@@ -463,8 +463,7 @@ class LSPClient:
         self, filepath: str, line: int, character: int
     ) -> List[Dict[str, Any]]:
         """Request completions at a position."""
-        if filepath not in self._open_files:
-            self.open_file(filepath)
+        self.open_file(filepath)  # idempotent, thread-safe
 
         result = self._send_request(
             "textDocument/completion",
@@ -494,8 +493,7 @@ class LSPClient:
 
     def get_hover(self, filepath: str, line: int, character: int) -> Optional[Dict[str, Any]]:
         """Request hover info at a position."""
-        if filepath not in self._open_files:
-            self.open_file(filepath)
+        self.open_file(filepath)  # idempotent, thread-safe
 
         result = self._send_request(
             "textDocument/hover",
@@ -525,8 +523,7 @@ class LSPClient:
         self, filepath: str, line: int, character: int
     ) -> Optional[Dict[str, Any]]:
         """Request go-to-definition at a position."""
-        if filepath not in self._open_files:
-            self.open_file(filepath)
+        self.open_file(filepath)  # idempotent, thread-safe
 
         result = self._send_request(
             "textDocument/definition",
@@ -556,8 +553,7 @@ class LSPClient:
         self, filepath: str, diagnostic: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """Request code actions for a diagnostic."""
-        if filepath not in self._open_files:
-            self.open_file(filepath)
+        self.open_file(filepath)  # idempotent, thread-safe
 
         result = self._send_request(
             "textDocument/codeAction",
@@ -586,8 +582,7 @@ class LSPClient:
 
     def format_file(self, filepath: str) -> Optional[List[Dict[str, Any]]]:
         """Request document formatting."""
-        if filepath not in self._open_files:
-            self.open_file(filepath)
+        self.open_file(filepath)  # idempotent, thread-safe
 
         result = self._send_request(
             "textDocument/formatting",
@@ -607,6 +602,11 @@ class LSPClient:
         Uses threading.Event for cross-thread sync instead of asyncio.Future,
         which requires a running event loop. This works from any thread.
         """
+        # Check process health before writing
+        if not self.process or self.process.poll() is not None:
+            logger.debug("LSP request '%s' skipped: process not running", method)
+            return None
+
         with self._lock:
             self._request_id += 1
             req_id = str(self._request_id)
@@ -618,7 +618,7 @@ class LSPClient:
             self._pending_requests[req_id] = (event, result_box, error_box)
 
         try:
-            if self.process and self.process.stdin:
+            if self.process.stdin:
                 self.process.stdin.write(msg + "\n")
                 self.process.stdin.flush()
 
@@ -636,6 +636,8 @@ class LSPClient:
 
         except Exception as e:
             logger.debug("LSP request '%s' failed: %s", method, e)
+            with self._lock:
+                self._pending_requests.pop(req_id, None)
             return None
 
     def _send_notification(self, method: str, params: Any = None) -> None:
