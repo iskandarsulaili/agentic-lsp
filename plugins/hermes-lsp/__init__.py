@@ -25,6 +25,7 @@ import sys
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -105,6 +106,22 @@ def _parse_response(line: str) -> Dict[str, Any]:
 
 # Known language servers and how to launch them
 LANGUAGE_SERVERS: Dict[str, Dict[str, Any]] = {
+    "c": {
+        "name": "clangd",
+        "command": ["clangd"],
+        "fallback_commands": [],
+        "install_hint": "Install clangd via your package manager (apt install clangd, brew install llvm)",
+        "extensions": [".c", ".h"],
+        "root_patterns": ["compile_commands.json", ".git"],
+    },
+    "cpp": {
+        "name": "clangd",
+        "command": ["clangd"],
+        "fallback_commands": [],
+        "install_hint": "Install clangd via your package manager (apt install clangd, brew install llvm)",
+        "extensions": [".cpp", ".cxx", ".cc", ".hpp", ".hxx", ".hh"],
+        "root_patterns": ["compile_commands.json", ".git"],
+    },
     "python": {
         "name": "Pyright / Pylance",
         "command": ["pyright-langserver", "--stdio"],
@@ -259,7 +276,17 @@ def _check_server_available(command: List[str]) -> bool:
         except Exception:
             pass
 
-    return False
+    # Fallback: try to run the command with --version
+    try:
+        result = subprocess.run(
+            [command[0], "--version"],
+            capture_output=True,
+            text=True,
+            timeout=LSP_CHECK_TIMEOUT,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
 
 
 # =============================================================================
@@ -287,6 +314,7 @@ class LSPClient:
     _open_files: Set[str] = field(default_factory=set)
     _open_files_lock: threading.Lock = field(default_factory=threading.Lock)
     _read_buf: bytes = b""  # leftover bytes from partial reads
+    _timeout_count: int = 0  # consecutive timeouts for backoff
     _stopped: bool = False
 
     def start(self) -> bool:
@@ -369,17 +397,39 @@ class LSPClient:
         """Shut down the language server.
 
         Sends shutdown notification (fire-and-forget, no wait) to avoid
-        deadlocking on a crashed reader thread.
+        deadlocking on a crashed reader thread. Closes pipes to unblock
+        the reader thread.
         """
         self._stopped = True
         if self._initialized:
             self._send_notification("exit", {})
+        # Close pipes to unblock the reader thread immediately
+        self._close_pipes()
         if self.process:
             try:
                 self.process.terminate()
                 self.process.wait(timeout=LSP_STOP_TIMEOUT)
             except Exception:
                 self.process.kill()
+
+    def _close_pipes(self) -> None:
+        """Close stdin/stdout/stderr pipes to unblock reader thread."""
+        if self.process:
+            try:
+                if self.process.stdin:
+                    self.process.stdin.close()
+            except Exception:
+                pass
+            try:
+                if self.process.stdout:
+                    self.process.stdout.close()
+            except Exception:
+                pass
+            try:
+                if self.process.stderr:
+                    self.process.stderr.close()
+            except Exception:
+                pass
 
     def open_file(self, filepath: str, content: Optional[str] = None) -> None:
         """Notify the server that a file is open."""
@@ -642,9 +692,11 @@ class LSPClient:
 
     def _send_notification(self, method: str, params: Any = None) -> None:
         """Send a notification (no response expected)."""
+        if not self.process or self.process.poll() is not None:
+            return
         msg = _make_notification(method, params)
         try:
-            if self.process and self.process.stdin:
+            if self.process.stdin:
                 self.process.stdin.write(msg + "\n")
                 self.process.stdin.flush()
         except Exception as e:
@@ -678,8 +730,14 @@ class LSPClient:
                 # Read Content-Length header line (with timeout via polling)
                 header_line = self._read_line_timeout(timeout=LSP_HEADER_TIMEOUT)
                 if header_line is None:
-                    # Timeout — check if we should still be running
+                    # Timeout — increment counter, back off if persistent
+                    self._timeout_count += 1
+                    if self._timeout_count >= 10:
+                        logger.debug("LSP read loop: 10 consecutive timeouts, breaking")
+                        break
+                    time.sleep(min(0.1 * self._timeout_count, 1.0))
                     continue
+                self._timeout_count = 0  # reset on success
 
                 if not header_line:
                     break
@@ -716,14 +774,13 @@ class LSPClient:
         Reads in 4KB chunks for efficiency, preserves leftover bytes
         across calls via _read_buf.
         """
-        import os as _os
         deadline = time.time() + timeout
         buf = self._read_buf
         self._read_buf = b""
         while time.time() < deadline and not self._stopped and self.process and self.process.poll() is None:
             try:
                 if b"\n" not in buf:
-                    chunk = _os.read(self.process.stdout.fileno(), LSP_READ_CHUNK_SIZE)
+                    chunk = os.read(self.process.stdout.fileno(), LSP_READ_CHUNK_SIZE)
                     if not chunk:
                         return None if not buf else buf.decode("utf-8", errors="replace")
                     buf += chunk
@@ -743,7 +800,6 @@ class LSPClient:
         First consumes any leftover bytes in _read_buf, then reads
         the remainder from the pipe.
         """
-        import os as _os
         deadline = time.time() + timeout
         # Consume leftover bytes first
         buf = self._read_buf
@@ -751,7 +807,7 @@ class LSPClient:
         while len(buf) < length and time.time() < deadline and not self._stopped and self.process and self.process.poll() is None:
             try:
                 remaining = length - len(buf)
-                chunk = _os.read(self.process.stdout.fileno(), remaining)
+                chunk = os.read(self.process.stdout.fileno(), remaining)
                 if not chunk:
                     return None  # EOF
                 buf += chunk
@@ -824,6 +880,9 @@ class LSPClient:
             # server-side buffer buildup, but don't act on them.
             elif method.startswith("$/") or method.startswith("window/"):
                 pass  # acknowledged by reading
+            # Log unknown notifications at debug level for troubleshooting
+            else:
+                logger.debug("LSP unhandled notification: %s", method)
 
     def _path_to_uri(self, path: str) -> str:
         """Convert a filesystem path to a file:// URI."""
@@ -872,29 +931,33 @@ class LSPManager:
 
         key = f"{language}:{project_root}"
 
+        # Fast path: check without lock first
+        if key in self._clients:
+            return self._clients[key]
+
+        # Check server availability outside the lock (subprocess.run is slow)
+        config = LANGUAGE_SERVERS.get(language)
+        if config is None:
+            return None
+
+        command = config["command"]
+        if not _check_server_available(command):
+            for fallback in config.get("fallback_commands", []):
+                if _check_server_available(fallback):
+                    command = fallback
+                    break
+            else:
+                logger.info(
+                    "LSP server for %s not available. Install: %s",
+                    language,
+                    config.get("install_hint", ""),
+                )
+                return None
+
+        # Double-check under lock after expensive check
         with self._lock:
             if key in self._clients:
                 return self._clients[key]
-
-            config = LANGUAGE_SERVERS.get(language)
-            if config is None:
-                return None
-
-            # Try the primary command
-            command = config["command"]
-            if not _check_server_available(command):
-                # Try fallbacks
-                for fallback in config.get("fallback_commands", []):
-                    if _check_server_available(fallback):
-                        command = fallback
-                        break
-                else:
-                    logger.info(
-                        "LSP server for %s not available. Install: %s",
-                        language,
-                        config.get("install_hint", ""),
-                    )
-                    return None
 
             client = LSPClient(
                 language=language,
@@ -1446,24 +1509,29 @@ def _handle_lsp_servers(args: dict, **kwargs: Any) -> str:
 
     if action == "status":
         # Show running clients
-        clients = []
+        # Collect client snapshots under manager lock, then read per-client
+        # state outside the lock to avoid deadlock with reader thread.
+        client_snapshots = []
         with manager._lock:
             for key, client in manager._clients.items():
-                with client._open_files_lock:
-                    open_files = list(client._open_files)
-                with client._diag_lock:
-                    diag_count = sum(len(d) for d in client._diagnostics.values())
-                clients.append(
-                    {
-                        "key": key,
-                        "language": client.language,
-                        "server": client.server_name,
-                        "project_root": client.project_root,
-                        "initialized": client._initialized,
-                        "open_files": open_files,
-                        "diagnostic_count": diag_count,
-                    }
-                )
+                client_snapshots.append((key, client))
+        clients = []
+        for key, client in client_snapshots:
+            with client._open_files_lock:
+                open_files = list(client._open_files)
+            with client._diag_lock:
+                diag_count = sum(len(d) for d in client._diagnostics.values())
+            clients.append(
+                {
+                    "key": key,
+                    "language": client.language,
+                    "server": client.server_name,
+                    "project_root": client.project_root,
+                    "initialized": client._initialized,
+                    "open_files": open_files,
+                    "diagnostic_count": diag_count,
+                }
+            )
         return json.dumps(
             {
                 "success": True,
@@ -1578,15 +1646,20 @@ def _cmd_lsp(raw_args: str) -> str:
 
     else:
         # Status
-        clients = []
+        # Collect client snapshots under manager lock, then read per-client
+        # state outside the lock to avoid deadlock with reader thread.
+        client_snapshots = []
         with manager._lock:
             for key, client in manager._clients.items():
-                with client._open_files_lock:
-                    open_count = len(client._open_files)
-                clients.append(
-                    f"  {client.language} ({client.server_name}) @ {client.project_root}"
-                    f" — {open_count} files open"
-                )
+                client_snapshots.append((key, client))
+        clients = []
+        for key, client in client_snapshots:
+            with client._open_files_lock:
+                open_count = len(client._open_files)
+            clients.append(
+                f"  {client.language} ({client.server_name}) @ {client.project_root}"
+                f" — {open_count} files open"
+            )
         servers = manager.get_available_servers()
         available = sum(1 for s in servers if s["available"])
 

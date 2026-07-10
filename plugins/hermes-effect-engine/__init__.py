@@ -30,6 +30,7 @@ import time
 import traceback
 import uuid
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import (
@@ -82,6 +83,12 @@ EFFECT_RETRY_MAX_DELAY_MS = _env_float("HERMES_EFFECT_RETRY_MAX_DELAY_MS", 30000
 EFFECT_DEFAULT_TIMEOUT_MS = _env_float("HERMES_EFFECT_DEFAULT_TIMEOUT_MS", 30000.0)
 EFFECT_SHELL_TIMEOUT = _env_float("HERMES_EFFECT_SHELL_TIMEOUT", 30.0)
 EFFECT_FIBER_JOIN_TIMEOUT = _env_float("HERMES_EFFECT_FIBER_JOIN_TIMEOUT", 30.0)
+
+# Module-level thread pool for Effect.with_timeout (avoids thread leak)
+_EFFECT_POOL = ThreadPoolExecutor(
+    max_workers=_env_int("HERMES_EFFECT_POOL_SIZE", 4),
+    thread_name_prefix="effect-pool",
+)
 
 # =============================================================================
 # Typed Errors  (like Effect-ts Schema.TaggedError)
@@ -434,7 +441,14 @@ class Scope:
                     fiber.status = FiberStatus.FAILED
                     raise
 
-            fiber._task = asyncio.create_task(_run(), name=fiber.name)
+            try:
+                fiber._task = asyncio.create_task(_run(), name=fiber.name)
+            except RuntimeError as e:
+                if "no running event loop" in str(e):
+                    raise ConcurrencyError(
+                        reason="No running event loop — Scope.fork() must be called from an async context"
+                    ) from e
+                raise
             self._fibers.append(fiber)
 
         # Clean up completed fibers (outside lock to avoid deadlock)
@@ -788,6 +802,7 @@ class Effect(Generic[T, E]):
         """Add a timeout (like Effect-ts ``Effect.timeout``).
 
         Uses a thread-based timer to avoid creating event loops.
+        Reuses a module-level thread pool to avoid thread leaks.
         """
 
         def _timeout() -> T:
@@ -803,8 +818,7 @@ class Effect(Generic[T, E]):
                 finally:
                     done.set()
 
-            thread = threading.Thread(target=_run, daemon=True)
-            thread.start()
+            _EFFECT_POOL.submit(_run)
 
             if not done.wait(timeout=timeout_ms / 1000):
                 raise TimeoutError(duration_ms=timeout_ms)
@@ -1414,12 +1428,16 @@ async def _handle_effect_scope(args: dict, **kwargs: Any) -> str:
                     "status": fiber.status.value,
                 }
             )
-        except TypedError as e:
+        except Exception as e:
+            error_dict = e.to_dict() if isinstance(e, TypedError) else {
+                "_tag": "UnhandledError",
+                "message": str(e),
+            }
             return json.dumps(
                 {
                     "success": False,
                     "fiber_id": fiber.id,
-                    "error": e.to_dict(),
+                    "error": error_dict,
                     "status": fiber.status.value,
                 }
             )
