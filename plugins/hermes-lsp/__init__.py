@@ -72,6 +72,7 @@ LSP_MAX_WARNINGS = _env_int("HERMES_LSP_MAX_WARNINGS", 20)
 LSP_MAX_INFO = _env_int("HERMES_LSP_MAX_INFO", 10)
 LSP_MAX_COMPLETIONS = _env_int("HERMES_LSP_MAX_COMPLETIONS", 30)
 LSP_MAX_CONTENT_LENGTH = _env_int("HERMES_LSP_MAX_CONTENT_LENGTH", 10 * 1024 * 1024)  # 10MB
+LSP_CLIENT_TTL = _env_float("HERMES_LSP_CLIENT_TTL", 300.0)  # 5 min idle eviction
 
 # =============================================================================
 # JSON-RPC Protocol (lightweight, no external deps)
@@ -316,6 +317,7 @@ class LSPClient:
     _open_files_lock: threading.Lock = field(default_factory=threading.Lock)
     _read_buf: bytes = b""  # leftover bytes from partial reads
     _timeout_count: int = 0  # consecutive timeouts for backoff
+    _last_activity: float = field(default_factory=time.time)  # last access time for eviction
     _stopped: bool = False
 
     def start(self) -> bool:
@@ -950,6 +952,7 @@ class LSPManager:
     """Manages language server clients for multiple languages.
 
     Thread-safe singleton.  Clients are created lazily per (language, project_root).
+    Idle clients are evicted after LSP_CLIENT_TTL seconds of inactivity.
     """
 
     def __init__(self):
@@ -957,12 +960,63 @@ class LSPManager:
         self._lock = threading.Lock()
         self._started = False
         self._read_buf: Dict[str, bytes] = {}  # per-client leftover buffer
+        self._root_cache: Dict[str, str] = {}  # filepath -> project_root cache
+        self._server_cache: Dict[str, bool] = {}  # command -> available cache
+        self._server_cache_ttl: float = 60.0  # seconds
+        self._last_server_check: float = 0.0
+        self._eviction_thread: Optional[threading.Thread] = None
+        self._eviction_interval: float = 60.0  # seconds between eviction sweeps
 
     def ensure_started(self) -> None:
         """Ensure the manager is initialized."""
         if self._started:
             return
         self._started = True
+        # Start background eviction thread
+        self._eviction_thread = threading.Thread(
+            target=self._eviction_loop,
+            name="lsp-eviction",
+            daemon=True,
+        )
+        self._eviction_thread.start()
+
+    def _eviction_loop(self) -> None:
+        """Background thread: periodically evict idle clients."""
+        while True:
+            time.sleep(self._eviction_interval)
+            self._evict_idle_clients()
+
+    def _evict_idle_clients(self) -> None:
+        """Evict clients that have been idle beyond TTL."""
+        now = time.time()
+        with self._lock:
+            idle_keys = [
+                key for key, client in self._clients.items()
+                if client._last_activity and (now - client._last_activity) > LSP_CLIENT_TTL
+            ]
+            for key in idle_keys:
+                client = self._clients.pop(key)
+                client.stop()
+
+    def _check_server_cached(self, command: List[str]) -> bool:
+        """Check server availability with caching."""
+        now = time.time()
+        if now - self._last_server_check > self._server_cache_ttl:
+            self._server_cache.clear()
+            self._last_server_check = now
+        cmd_key = " ".join(command)
+        if cmd_key not in self._server_cache:
+            self._server_cache[cmd_key] = _check_server_available(command)
+        return self._server_cache[cmd_key]
+
+    def _find_project_root_cached(self, filepath: str) -> Optional[str]:
+        """Find project root with caching."""
+        if filepath in self._root_cache:
+            return self._root_cache[filepath]
+        root = _find_project_root(filepath)
+        if root:
+            self._root_cache[filepath] = root
+        return root
 
     def get_client_for_file(self, filepath: str) -> Optional[LSPClient]:
         """Get or create an LSP client for a file."""
@@ -970,7 +1024,7 @@ class LSPManager:
         if language is None:
             return None
 
-        project_root = _find_project_root(filepath)
+        project_root = self._find_project_root_cached(filepath)
         if project_root is None:
             return None
 
@@ -979,7 +1033,9 @@ class LSPManager:
         # Fast path: check under shared lock (avoids TOCTOU race)
         with self._lock:
             if key in self._clients:
-                return self._clients[key]
+                client = self._clients[key]
+                client._last_activity = time.time()
+                return client
 
         # Check server availability outside the lock (subprocess.run is slow)
         config = LANGUAGE_SERVERS.get(language)
@@ -987,9 +1043,9 @@ class LSPManager:
             return None
 
         command = config["command"]
-        if not _check_server_available(command):
+        if not self._check_server_cached(command):
             for fallback in config.get("fallback_commands", []):
-                if _check_server_available(fallback):
+                if self._check_server_cached(fallback):
                     command = fallback
                     break
             else:
