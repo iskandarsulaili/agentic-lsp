@@ -23,6 +23,7 @@
   <a href="https://github.com/iskandarsulaili/agentic-lsp/blob/main/LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"></a>
   <a href="#"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-blue?style=flat-square&logo=python"></a>
   <a href="#"><img alt="Zero deps" src="https://img.shields.io/badge/dependencies-zero-success?style=flat-square"></a>
+  <a href="https://github.com/sponsors/iskandarsulaili"><img alt="Sponsor" src="https://img.shields.io/badge/sponsor-30363D?style=flat-square&logo=GitHub-Sponsors&logoColor=EA4AAA"></a>
 </p>
 
 ---
@@ -73,15 +74,23 @@ Both plugins are **pure Python with zero external dependencies** (stdlib only). 
 ### Install
 
 ```bash
-# Clone into Hermes user plugins
-git clone https://github.com/iskandarsulaili/agentic-lsp.git ~/.hermes/plugins/agentic-lsp
+# Clone the repo
+git clone https://github.com/iskandarsulaili/agentic-lsp.git /tmp/agentic-lsp
 
-# Or just the LSP plugin
-cp -r agentic-lsp/plugins/hermes-lsp ~/.hermes/plugins/hermes-lsp
+# Install LSP plugin (recommended for most users)
+cp -r /tmp/agentic-lsp/plugins/hermes-lsp ~/.hermes/plugins/hermes-lsp
 
-# Or just the effect engine
-cp -r agentic-lsp/plugins/hermes-effect-engine ~/.hermes/plugins/hermes-effect-engine
+# Install effect engine (optional — for typed errors + DI)
+cp -r /tmp/agentic-lsp/plugins/hermes-effect-engine ~/.hermes/plugins/hermes-effect-engine
+
+# Install the skill (optional — teaches the agent the workflow)
+cp -r /tmp/agentic-lsp/skills/agentic-coding-enhanced ~/.hermes/skills/agentic-coding-enhanced
+
+# Clean up
+rm -rf /tmp/agentic-lsp
 ```
+
+> **Important:** Each plugin must be a direct subdirectory of `~/.hermes/plugins/`. Cloning the whole repo into `~/.hermes/plugins/agentic-lsp/` will NOT work — Hermes expects `~/.hermes/plugins/<plugin-name>/__init__.py`.
 
 Restart Hermes. The tools appear automatically — no config changes needed.
 
@@ -269,6 +278,16 @@ PRs welcome! Areas that need work:
 - **Pydantic schemas** — add typed schemas for common tool inputs/outputs
 - **OpenCode plugin adapter** — adapt the Hermes `register(ctx)` pattern to OpenCode's plugin system
 - **Claude Code plugin adapter** — adapt for Claude Code's plugin marketplace
+
+## 💖 Support
+
+If agentic-lsp saves you time or helps you ship better code, consider sponsoring:
+
+<p align="center">
+  <a href="https://github.com/sponsors/iskandarsulaili">
+    <img src="https://img.shields.io/badge/Sponsor%20on%20GitHub-30363D?style=for-the-badge&logo=GitHub-Sponsors&logoColor=#EA4AAA" alt="Sponsor">
+  </a>
+</p>
 
 ## 📄 License
 

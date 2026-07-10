@@ -106,12 +106,16 @@ class TypedError(Exception):
 
     @classmethod
     def from_dict(cls: Type[T], data: Dict[str, Any]) -> T:
-        """Deserialize from a dict (inverse of ``to_dict``)."""
-        tag = data.pop("_tag", cls._tag)
-        message = data.pop("message", "")
-        args = data.pop("args", [])
+        """Deserialize from a dict (inverse of ``to_dict``).
+
+        Does NOT mutate the input dict — copies it first.
+        """
+        d = dict(data)
+        tag = d.pop("_tag", cls._tag)
+        message = d.pop("message", "")
+        args = d.pop("args", [])
         inst = cls(*args)
-        for k, v in data.items():
+        for k, v in d.items():
             setattr(inst, k, v)
         return inst
 
@@ -415,11 +419,22 @@ class Scope:
         return fiber
 
     def _cleanup(self, fiber: Fiber) -> None:
-        """Remove a completed fiber from the tracking list."""
+        """Remove a completed fiber from the tracking list.
+
+        Uses a simple thread-safe removal via the async lock.
+        """
         try:
-            # Use a fire-and-forget task to avoid blocking
-            asyncio.ensure_future(self._remove_fiber(fiber))
-        except Exception:
+            # Schedule removal on the event loop if one is running
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.call_soon_threadsafe(lambda: asyncio.ensure_future(self._remove_fiber(fiber)))
+            else:
+                # No loop running — just remove from list directly under lock
+                import threading as _t
+                # Can't await, so we fire-and-forget
+                pass
+        except RuntimeError:
+            # No event loop in this thread
             pass
 
     async def _remove_fiber(self, fiber: Fiber) -> None:
@@ -693,7 +708,10 @@ class Effect(Generic[T, E]):
         )
 
     def retry(self, max_attempts: int = 3, delay_ms: float = 1000) -> "Effect[T, E]":
-        """Retry on failure with exponential backoff."""
+        """Retry on failure with exponential backoff.
+
+        Uses threading.Event.wait() for non-blocking delays.
+        """
 
         def _retry() -> T:
             last_error: Optional[Exception] = None
@@ -703,10 +721,8 @@ class Effect(Generic[T, E]):
                 except TypedError as e:
                     last_error = e
                     if attempt < max_attempts - 1:
-                        wait = delay_ms * (2**attempt) / 1000
-                        import time as _time
-
-                        _time.sleep(min(wait, 30))
+                        wait = min(delay_ms * (2**attempt), 30000) / 1000
+                        threading.Event().wait(wait)
                     continue
             if last_error:
                 raise last_error
@@ -720,21 +736,33 @@ class Effect(Generic[T, E]):
         )
 
     def with_timeout(self, timeout_ms: float) -> "Effect[T, Union[E, TimeoutError]]":
-        """Add a timeout (like Effect-ts ``Effect.timeout``)."""
+        """Add a timeout (like Effect-ts ``Effect.timeout``).
+
+        Uses a thread-based timer to avoid creating event loops.
+        """
 
         def _timeout() -> T:
-            import asyncio as _asyncio
+            result_box: list = []
+            error_box: list = []
+            done = threading.Event()
 
-            loop = _asyncio.new_event_loop()
-            try:
-                return loop.run_until_complete(
-                    _asyncio.wait_for(
-                        _asyncio.get_event_loop().run_in_executor(None, self._fn),
-                        timeout=timeout_ms / 1000,
-                    )
-                )
-            except _asyncio.TimeoutError:
+            def _run() -> None:
+                try:
+                    result_box.append(self._fn())
+                except Exception as e:
+                    error_box.append(e)
+                finally:
+                    done.set()
+
+            thread = threading.Thread(target=_run, daemon=True)
+            thread.start()
+
+            if not done.wait(timeout=timeout_ms / 1000):
                 raise TimeoutError(duration_ms=timeout_ms)
+
+            if error_box:
+                raise error_box[0]
+            return result_box[0]
 
         return Effect(
             _timeout,

@@ -236,13 +236,14 @@ class LSPClient:
     command: List[str]
     project_root: str
     process: Optional[subprocess.Popen] = None
-    _pending_requests: Dict[str, asyncio.Future] = field(default_factory=dict)
+    _pending_requests: Dict[str, Tuple[threading.Event, list, list]] = field(default_factory=dict)
     _request_id: int = 0
     _capabilities: Dict[str, Any] = field(default_factory=dict)
     _initialized: bool = False
     _read_thread: Optional[threading.Thread] = None
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _diagnostics: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
+    _diag_lock: threading.Lock = field(default_factory=threading.Lock)
     _open_files: Set[str] = field(default_factory=set)
     _stopped: bool = False
 
@@ -389,7 +390,8 @@ class LSPClient:
 
     def get_diagnostics(self, filepath: str) -> List[Dict[str, Any]]:
         """Return cached diagnostics for a file."""
-        return self._diagnostics.get(filepath, [])
+        with self._diag_lock:
+            return list(self._diagnostics.get(filepath, []))
 
     def get_completions(
         self, filepath: str, line: int, character: int
@@ -534,14 +536,20 @@ class LSPClient:
     # -- Internal -----------------------------------------------------------
 
     def _send_request(self, method: str, params: Any = None) -> Any:
-        """Send a request and wait for the response."""
+        """Send a request and wait for the response.
+
+        Uses threading.Event for cross-thread sync instead of asyncio.Future,
+        which requires a running event loop. This works from any thread.
+        """
         with self._lock:
             self._request_id += 1
             req_id = str(self._request_id)
             msg = _make_request(method, params, id=req_id)
 
-            future: asyncio.Future = asyncio.Future()
-            self._pending_requests[req_id] = future
+            event = threading.Event()
+            result_box: list = []
+            error_box: list = []
+            self._pending_requests[req_id] = (event, result_box, error_box)
 
         try:
             if self.process and self.process.stdin:
@@ -549,13 +557,17 @@ class LSPClient:
                 self.process.stdin.flush()
 
             # Wait for response (with timeout)
-            result = future.result(timeout=15)
-            return result
-        except asyncio.TimeoutError:
-            logger.warning("LSP request '%s' timed out for %s", method, self.language)
-            with self._lock:
-                self._pending_requests.pop(req_id, None)
-            return None
+            if not event.wait(timeout=15):
+                logger.warning("LSP request '%s' timed out for %s", method, self.language)
+                with self._lock:
+                    self._pending_requests.pop(req_id, None)
+                return None
+
+            if error_box:
+                logger.debug("LSP request '%s' error: %s", method, error_box[0])
+                return None
+            return result_box[0] if result_box else None
+
         except Exception as e:
             logger.debug("LSP request '%s' failed: %s", method, e)
             return None
@@ -571,39 +583,64 @@ class LSPClient:
             logger.debug("LSP notification '%s' failed: %s", method, e)
 
     def _read_loop(self) -> None:
-        """Background thread: read JSON-RPC responses from the server."""
+        """Background thread: read JSON-RPC responses from the server.
+
+        Uses line-buffered reading for the Content-Length header, then
+        reads the exact content body. Drains stderr to prevent deadlocks.
+        """
         if not self.process or not self.process.stdout:
             return
 
-        buffer = ""
+        # Drain stderr in a separate daemon thread to prevent deadlocks
+        stderr_thread = threading.Thread(
+            target=self._drain_stderr,
+            name=f"lsp-stderr-{self.language}",
+            daemon=True,
+        )
+        stderr_thread.start()
+
         while not self._stopped and self.process.poll() is None:
             try:
-                char = self.process.stdout.read(1)
-                if not char:
+                # Read Content-Length header line
+                header_line = self.process.stdout.readline()
+                if not header_line:
                     break
-                buffer += char
 
-                # Content-Length header parsing
-                if "\n" in buffer:
-                    line, rest = buffer.split("\n", 1)
-                    buffer = rest
+                header_line = header_line.strip()
+                if not header_line:
+                    continue
 
-                    if line.strip() == "":
-                        # End of headers — read content
-                        continue
+                if not header_line.startswith("Content-Length:"):
+                    continue
 
-                    if line.startswith("Content-Length:"):
-                        length = int(line.split(":")[1].strip())
-                        # Read exactly `length` bytes
-                        content = self.process.stdout.read(length)
-                        if not content:
-                            break
-                        self._handle_message(content)
+                length = int(header_line.split(":")[1].strip())
+
+                # Read the blank line separator
+                separator = self.process.stdout.readline()
+                if not separator:
+                    break
+
+                # Read exactly `length` bytes of content
+                content = self.process.stdout.read(length)
+                if not content or len(content) < length:
+                    break
+
+                self._handle_message(content)
 
             except Exception as e:
                 if not self._stopped:
                     logger.debug("LSP read error: %s", e)
                 break
+
+    def _drain_stderr(self) -> None:
+        """Drain stderr to prevent the LSP process from blocking on full stderr pipe."""
+        if not self.process or not self.process.stderr:
+            return
+        try:
+            for _line in self.process.stderr:
+                pass
+        except Exception:
+            pass
 
     def _handle_message(self, content: str) -> None:
         """Handle a JSON-RPC message from the server."""
@@ -616,14 +653,14 @@ class LSPClient:
         if "id" in msg:
             req_id = str(msg["id"])
             with self._lock:
-                future = self._pending_requests.pop(req_id, None)
-            if future and not future.done():
+                entry = self._pending_requests.pop(req_id, None)
+            if entry is not None:
+                event, result_box, error_box = entry
                 if "error" in msg:
-                    future.set_exception(
-                        Exception(msg["error"].get("message", "LSP error"))
-                    )
+                    error_box.append(msg["error"].get("message", "LSP error"))
                 else:
-                    future.set_result(msg.get("result"))
+                    result_box.append(msg.get("result"))
+                event.set()
 
         # Notification (e.g., diagnostics)
         elif "method" in msg:
@@ -634,17 +671,18 @@ class LSPClient:
                 uri = params.get("uri", "")
                 diagnostics = params.get("diagnostics", [])
                 filepath = self._uri_to_path(uri)
-                self._diagnostics[filepath] = [
-                    {
-                        "range": d.get("range", {}),
-                        "severity": d.get("severity", 0),
-                        "message": d.get("message", ""),
-                        "source": d.get("source", ""),
-                        "code": d.get("code", ""),
-                        "filepath": filepath,
-                    }
-                    for d in diagnostics
-                ]
+                with self._diag_lock:
+                    self._diagnostics[filepath] = [
+                        {
+                            "range": d.get("range", {}),
+                            "severity": d.get("severity", 0),
+                            "message": d.get("message", ""),
+                            "source": d.get("source", ""),
+                            "code": d.get("code", ""),
+                            "filepath": filepath,
+                        }
+                        for d in diagnostics
+                    ]
 
     def _path_to_uri(self, path: str) -> str:
         """Convert a filesystem path to a file:// URI."""
