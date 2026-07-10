@@ -414,21 +414,28 @@ class LSPClient:
                 self.process.kill()
 
     def _close_pipes(self) -> None:
-        """Close stdin/stdout/stderr pipes to unblock reader thread."""
+        """Close stdin/stdout/stderr pipes to unblock reader thread.
+
+        Sets pipe references to None after closing so callers can
+        distinguish closed pipes from open ones.
+        """
         if self.process:
             try:
                 if self.process.stdin:
                     self.process.stdin.close()
+                    self.process.stdin = None  # type: ignore[assignment]
             except Exception:
                 pass
             try:
                 if self.process.stdout:
                     self.process.stdout.close()
+                    self.process.stdout = None  # type: ignore[assignment]
             except Exception:
                 pass
             try:
                 if self.process.stderr:
                     self.process.stderr.close()
+                    self.process.stderr = None  # type: ignore[assignment]
             except Exception:
                 pass
 
@@ -914,9 +921,9 @@ class LSPClient:
                         }
                         for d in diagnostics
                     ]
-            # Acknowledge $/progress and window/ notifications to prevent
-            # server-side buffer buildup, but don't act on them.
-            elif method.startswith("$/") or method.startswith("window/"):
+            # Acknowledge $/progress, window/, and telemetry/ notifications
+            # to prevent server-side buffer buildup, but don't act on them.
+            elif method.startswith("$/") or method.startswith("window/") or method.startswith("telemetry/"):
                 pass  # acknowledged by reading
             # Log unknown notifications at debug level for troubleshooting
             else:

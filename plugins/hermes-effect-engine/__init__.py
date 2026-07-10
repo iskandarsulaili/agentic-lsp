@@ -25,6 +25,7 @@ import inspect
 import json
 import logging
 import os
+import subprocess
 import threading
 import time
 import traceback
@@ -1261,8 +1262,7 @@ async def _handle_effect_run(args: dict, **kwargs: Any) -> str:
                 path = params.get("path", "")
                 if not path:
                     raise ValidationFailedError(field="path", reason="path is required")
-                import os as _os
-                if not _os.path.exists(path):
+                if not os.path.exists(path):
                     raise NotFoundError(entity_type="file", entity_id=path)
                 with open(path) as f:
                     content = f.read()
@@ -1283,8 +1283,7 @@ async def _handle_effect_run(args: dict, **kwargs: Any) -> str:
                 cmd = params.get("command", "")
                 if not cmd:
                     raise ValidationFailedError(field="command", reason="command is required")
-                import subprocess as _sp
-                proc = _sp.run(
+                proc = subprocess.run(
                     cmd,
                     shell=True,
                     capture_output=True,
@@ -1394,9 +1393,7 @@ async def _handle_effect_scope(args: dict, **kwargs: Any) -> str:
             op_cmd = op.get("command", "")
 
             async def _run_cmd(c: str = op_cmd, n: str = op_name) -> str:
-                import subprocess as _sp
-
-                proc = _sp.run(c, shell=True, capture_output=True, text=True, timeout=EFFECT_SHELL_TIMEOUT)
+                proc = subprocess.run(c, shell=True, capture_output=True, text=True, timeout=EFFECT_SHELL_TIMEOUT)
                 return f"[{n}] exit={proc.returncode} stdout={proc.stdout[:200]}"
 
             fiber = await scope.fork(_run_cmd(), name=op_name)
