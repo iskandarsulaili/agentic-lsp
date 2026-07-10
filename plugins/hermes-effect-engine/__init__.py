@@ -498,8 +498,11 @@ class Scope:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
-        self._closed = True
-        await self.cancel_all()
+        with self._lock:
+            self._closed = True
+            for fiber in self._fibers:
+                fiber.interrupt()
+            self._fibers.clear()
 
 
 # =============================================================================
@@ -756,6 +759,7 @@ class Effect(Generic[T, E]):
         """Retry on failure with exponential backoff.
 
         Uses threading.Event.wait() for non-blocking delays.
+        Retries on both TypedError and non-typed exceptions.
         """
 
         def _retry() -> T:
@@ -763,7 +767,7 @@ class Effect(Generic[T, E]):
             for attempt in range(max_attempts):
                 try:
                     return self._fn()
-                except TypedError as e:
+                except Exception as e:
                     last_error = e
                     if attempt < max_attempts - 1:
                         wait = min(delay_ms * (2**attempt), EFFECT_RETRY_MAX_DELAY_MS) / 1000

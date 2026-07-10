@@ -216,7 +216,7 @@ def _find_language_for_file(filepath: str) -> Optional[str]:
     if name == "Dockerfile" or name.endswith(".dockerfile"):
         return "dockerfile"
     if name == "Makefile" or name.endswith(".mk"):
-        return "make"
+        return None  # No LSP server for Makefiles
 
     for lang, config in LANGUAGE_SERVERS.items():
         if ext in config["extensions"]:
@@ -490,7 +490,7 @@ class LSPClient:
                 "documentation": item.get("documentation", ""),
             }
             for item in items
-        ]
+        ][:LSP_MAX_COMPLETIONS]
 
     def get_hover(self, filepath: str, line: int, character: int) -> Optional[Dict[str, Any]]:
         """Request hover info at a position."""
@@ -720,7 +720,7 @@ class LSPClient:
         self._read_buf = b""
         while time.time() < deadline and not self._stopped and self.process and self.process.poll() is None:
             try:
-                if not buf:
+                if b"\n" not in buf:
                     chunk = _os.read(self.process.stdout.fileno(), LSP_READ_CHUNK_SIZE)
                     if not chunk:
                         return None if not buf else buf.decode("utf-8", errors="replace")
@@ -736,10 +736,16 @@ class LSPClient:
         return None  # timeout
 
     def _read_exact_timeout(self, length: int, timeout: float = LSP_CONTENT_TIMEOUT) -> Optional[str]:
-        """Read exactly `length` bytes from stdout with timeout."""
+        """Read exactly `length` bytes from stdout with timeout.
+
+        First consumes any leftover bytes in _read_buf, then reads
+        the remainder from the pipe.
+        """
         import os as _os
         deadline = time.time() + timeout
-        buf = b""
+        # Consume leftover bytes first
+        buf = self._read_buf
+        self._read_buf = b""
         while len(buf) < length and time.time() < deadline and not self._stopped and self.process and self.process.poll() is None:
             try:
                 remaining = length - len(buf)
@@ -761,6 +767,7 @@ class LSPClient:
             return
         try:
             import os as _os
+            _os.set_blocking(self.process.stderr.fileno(), False)
             while not self._stopped:
                 chunk = _os.read(self.process.stderr.fileno(), 4096)
                 if not chunk:
@@ -811,6 +818,10 @@ class LSPClient:
                         }
                         for d in diagnostics
                     ]
+            # Acknowledge $/progress and window/ notifications to prevent
+            # server-side buffer buildup, but don't act on them.
+            elif method.startswith("$/") or method.startswith("window/"):
+                pass  # acknowledged by reading
 
     def _path_to_uri(self, path: str) -> str:
         """Convert a filesystem path to a file:// URI."""
@@ -987,11 +998,16 @@ class LSPManager:
         return results
 
     def stop_all(self) -> None:
-        """Stop all language server clients."""
+        """Stop all language server clients.
+
+        Collects clients under lock, then stops them outside the lock
+        to prevent deadlock (client.stop() waits for process).
+        """
         with self._lock:
-            for key, client in self._clients.items():
-                client.stop()
+            clients = list(self._clients.values())
             self._clients.clear()
+        for client in clients:
+            client.stop()
 
 
 # =============================================================================
@@ -1310,7 +1326,7 @@ def _handle_lsp_completions(args: dict, **kwargs: Any) -> str:
             "success": True,
             "filepath": filepath,
             "position": {"line": line, "character": character},
-            "completions": completions[:30],
+            "completions": completions[:LSP_MAX_COMPLETIONS],
             "total": len(completions),
         }
     )
@@ -1429,22 +1445,23 @@ def _handle_lsp_servers(args: dict, **kwargs: Any) -> str:
     if action == "status":
         # Show running clients
         clients = []
-        for key, client in manager._clients.items():
-            with client._open_files_lock:
-                open_files = list(client._open_files)
-            with client._diag_lock:
-                diag_count = sum(len(d) for d in client._diagnostics.values())
-            clients.append(
-                {
-                    "key": key,
-                    "language": client.language,
-                    "server": client.server_name,
-                    "project_root": client.project_root,
-                    "initialized": client._initialized,
-                    "open_files": open_files,
-                    "diagnostic_count": diag_count,
-                }
-            )
+        with manager._lock:
+            for key, client in manager._clients.items():
+                with client._open_files_lock:
+                    open_files = list(client._open_files)
+                with client._diag_lock:
+                    diag_count = sum(len(d) for d in client._diagnostics.values())
+                clients.append(
+                    {
+                        "key": key,
+                        "language": client.language,
+                        "server": client.server_name,
+                        "project_root": client.project_root,
+                        "initialized": client._initialized,
+                        "open_files": open_files,
+                        "diagnostic_count": diag_count,
+                    }
+                )
         return json.dumps(
             {
                 "success": True,
@@ -1511,8 +1528,8 @@ def _handle_lsp_verify(args: dict, **kwargs: Any) -> str:
                 "warnings": len(warnings),
                 "total": len(diagnostics),
             },
-            "errors": errors[:10],
-            "warnings": warnings[:10],
+            "errors": errors[:LSP_MAX_DIAGNOSTICS],
+            "warnings": warnings[:LSP_MAX_WARNINGS],
             "suggestion": (
                 "Use lsp_auto_fix to get fix suggestions, then apply them and re-verify."
                 if not passed
@@ -1560,11 +1577,14 @@ def _cmd_lsp(raw_args: str) -> str:
     else:
         # Status
         clients = []
-        for key, client in manager._clients.items():
-            clients.append(
-                f"  {client.language} ({client.server_name}) @ {client.project_root}"
-                f" — {len(client._open_files)} files open"
-            )
+        with manager._lock:
+            for key, client in manager._clients.items():
+                with client._open_files_lock:
+                    open_count = len(client._open_files)
+                clients.append(
+                    f"  {client.language} ({client.server_name}) @ {client.project_root}"
+                    f" — {open_count} files open"
+                )
         servers = manager.get_available_servers()
         available = sum(1 for s in servers if s["available"])
 
