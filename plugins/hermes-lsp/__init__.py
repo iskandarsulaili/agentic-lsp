@@ -770,7 +770,7 @@ class LSPClient:
 
                     self._handle_message(content)
 
-                except (BrokenPipeError, ConnectionResetError):
+                except (BrokenPipeError, ConnectionResetError, EOFError):
                     break
                 except Exception as e:
                     if not self._stopped:
@@ -782,6 +782,9 @@ class LSPClient:
     def _read_line_timeout(self, timeout: float = 5) -> Optional[str]:
         """Read a line from stdout with timeout. Returns None on timeout.
 
+        Raises EOFError on EOF, BrokenPipeError, or ConnectionResetError
+        so the caller can distinguish timeout from terminal conditions.
+
         Reads in 4KB chunks for efficiency, preserves leftover bytes
         across calls via _read_buf.
         """
@@ -791,41 +794,57 @@ class LSPClient:
         while time.time() < deadline and not self._stopped and self.process and self.process.poll() is None:
             try:
                 if b"\n" not in buf:
+                    if not self.process.stdout:
+                        raise EOFError("stdout closed")
                     chunk = os.read(self.process.stdout.fileno(), LSP_READ_CHUNK_SIZE)
                     if not chunk:
-                        return None if not buf else buf.decode("utf-8", errors="replace")
+                        raise EOFError("stdout EOF")
                     buf += chunk
                 if b"\n" in buf:
                     line, self._read_buf = buf.split(b"\n", 1)
                     return line.decode("utf-8", errors="replace") + "\n"
-            except BlockingIOError:
+            except (BlockingIOError, ValueError):
                 time.sleep(LSP_READ_POLL_INTERVAL)
-            except Exception:
-                return None if not buf else buf.decode("utf-8", errors="replace")
+            except (BrokenPipeError, ConnectionResetError, EOFError):
+                raise
+            except OSError:
+                raise EOFError("stdout read error")
         self._read_buf = buf  # preserve for next call
         return None  # timeout
 
     def _read_exact_timeout(self, length: int, timeout: float = LSP_CONTENT_TIMEOUT) -> Optional[str]:
         """Read exactly `length` bytes from stdout with timeout.
 
+        Raises EOFError on EOF, BrokenPipeError, or ConnectionResetError
+        so the caller can distinguish timeout from terminal conditions.
+
         First consumes any leftover bytes in _read_buf, then reads
-        the remainder from the pipe.
+        the remainder from the pipe. Preserves excess bytes in _read_buf.
         """
         deadline = time.time() + timeout
-        # Consume leftover bytes first
+        # Consume leftover bytes first, preserving excess
         buf = self._read_buf
         self._read_buf = b""
+        if len(buf) >= length:
+            # _read_buf already has enough data
+            result = buf[:length]
+            self._read_buf = buf[length:]  # preserve excess
+            return result.decode("utf-8", errors="replace")
         while len(buf) < length and time.time() < deadline and not self._stopped and self.process and self.process.poll() is None:
             try:
+                if not self.process.stdout:
+                    raise EOFError("stdout closed")
                 remaining = length - len(buf)
                 chunk = os.read(self.process.stdout.fileno(), remaining)
                 if not chunk:
-                    return None  # EOF
+                    raise EOFError("stdout EOF")
                 buf += chunk
-            except BlockingIOError:
+            except (BlockingIOError, ValueError):
                 time.sleep(LSP_READ_POLL_INTERVAL)
-            except Exception:
-                return None
+            except (BrokenPipeError, ConnectionResetError, EOFError):
+                raise
+            except OSError:
+                raise EOFError("stdout read error")
         if len(buf) < length:
             return None  # timeout
         return buf.decode("utf-8", errors="replace")
