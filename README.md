@@ -92,26 +92,19 @@ rm -rf /tmp/agentic-lsp
 
 > **Important:** Each plugin must be a direct subdirectory of `~/.hermes/plugins/`. Cloning the whole repo into `~/.hermes/plugins/agentic-lsp/` will NOT work — Hermes expects `~/.hermes/plugins/<plugin-name>/__init__.py`.
 
-Restart Hermes. The tools appear automatically — no config changes needed.
+### Enable Plugins
 
-### Install Language Servers
+Hermes requires standalone plugins to be explicitly enabled in config.yaml:
 
 ```bash
-# Python
-pip install pyright
-
-# TypeScript / JavaScript
-npm install -g typescript-language-server
-
-# Rust
-rustup component add rust-analyzer
-
-# Go
-go install golang.org/x/tools/gopls@latest
-
-# JSON / YAML / HTML / CSS / Bash / Dockerfile
-npm install -g vscode-json-languageserver yaml-language-server bash-language-server dockerfile-language-server-nodejs
+hermes config set plugins.enabled '["hermes-lsp", "hermes-effect-engine"]'
 ```
+
+This is a **one-time setup step**. After this, the plugins auto-load on every startup.
+
+### Restart Hermes
+
+Exit and re-run `hermes`. The tools and slash commands appear automatically.
 
 ### Verify Installation
 
@@ -119,8 +112,12 @@ npm install -g vscode-json-languageserver yaml-language-server bash-language-ser
 # In Hermes, run:
 /lsp servers
 # or
-lsp_servers action="list"
+/effect
 ```
+
+If you see server status or the effect engine state, everything is working.
+
+### Install Language Servers
 
 ## 🗺️ Supported Languages
 

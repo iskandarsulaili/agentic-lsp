@@ -286,6 +286,7 @@ class LSPClient:
     _diag_lock: threading.Lock = field(default_factory=threading.Lock)
     _open_files: Set[str] = field(default_factory=set)
     _open_files_lock: threading.Lock = field(default_factory=threading.Lock)
+    _read_buf: bytes = b""  # leftover bytes from partial reads
     _stopped: bool = False
 
     def start(self) -> bool:
@@ -710,24 +711,28 @@ class LSPClient:
     def _read_line_timeout(self, timeout: float = 5) -> Optional[str]:
         """Read a line from stdout with timeout. Returns None on timeout.
 
-        Reads in 4KB chunks for efficiency, yields individual lines.
+        Reads in 4KB chunks for efficiency, preserves leftover bytes
+        across calls via _read_buf.
         """
         import os as _os
         deadline = time.time() + timeout
-        buf = b""
+        buf = self._read_buf
+        self._read_buf = b""
         while time.time() < deadline and not self._stopped and self.process and self.process.poll() is None:
             try:
-                chunk = _os.read(self.process.stdout.fileno(), LSP_READ_CHUNK_SIZE)
-                if not chunk:
-                    return None if not buf else buf.decode("utf-8", errors="replace")
-                buf += chunk
+                if not buf:
+                    chunk = _os.read(self.process.stdout.fileno(), LSP_READ_CHUNK_SIZE)
+                    if not chunk:
+                        return None if not buf else buf.decode("utf-8", errors="replace")
+                    buf += chunk
                 if b"\n" in buf:
-                    line, rest = buf.split(b"\n", 1)
+                    line, self._read_buf = buf.split(b"\n", 1)
                     return line.decode("utf-8", errors="replace") + "\n"
             except BlockingIOError:
                 time.sleep(LSP_READ_POLL_INTERVAL)
             except Exception:
                 return None if not buf else buf.decode("utf-8", errors="replace")
+        self._read_buf = buf  # preserve for next call
         return None  # timeout
 
     def _read_exact_timeout(self, length: int, timeout: float = LSP_CONTENT_TIMEOUT) -> Optional[str]:
