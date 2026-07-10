@@ -969,9 +969,10 @@ class LSPManager:
 
         key = f"{language}:{project_root}"
 
-        # Fast path: check without lock first
-        if key in self._clients:
-            return self._clients[key]
+        # Fast path: check under shared lock (avoids TOCTOU race)
+        with self._lock:
+            if key in self._clients:
+                return self._clients[key]
 
         # Check server availability outside the lock (subprocess.run is slow)
         config = LANGUAGE_SERVERS.get(language)
