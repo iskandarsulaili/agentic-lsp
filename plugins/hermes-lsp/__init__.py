@@ -74,6 +74,11 @@ LSP_MAX_INFO = _env_int("HERMES_LSP_MAX_INFO", 10)
 LSP_MAX_COMPLETIONS = _env_int("HERMES_LSP_MAX_COMPLETIONS", 30)
 LSP_MAX_CONTENT_LENGTH = _env_int("HERMES_LSP_MAX_CONTENT_LENGTH", 10 * 1024 * 1024)  # 10MB
 LSP_CLIENT_TTL = _env_float("HERMES_LSP_CLIENT_TTL", 300.0)  # 5 min idle eviction
+LSP_EVICTION_INTERVAL = _env_float("HERMES_LSP_EVICTION_INTERVAL", 60.0)  # seconds between eviction sweeps
+LSP_SERVER_CACHE_TTL = _env_float("HERMES_LSP_SERVER_CACHE_TTL", 60.0)  # seconds before re-checking server availability
+LSP_CROSS_REPO_CACHE_TTL = _env_float("HERMES_LSP_CROSS_REPO_CACHE_TTL", 30.0)  # seconds before re-checking cross-repo results
+LSP_KNOWN_ROOTS_MAX = _env_int("HERMES_LSP_KNOWN_ROOTS_MAX", 50)  # max project roots before LRU eviction
+LSP_CROSS_REPO_CACHE_MAX = _env_int("HERMES_LSP_CROSS_REPO_CACHE_MAX", 100)  # max cross-repo cache entries before LRU eviction
 
 # =============================================================================
 # JSON-RPC Protocol (lightweight, no external deps)
@@ -244,14 +249,23 @@ def _find_language_for_file(filepath: str) -> Optional[str]:
     return None
 
 
-def _find_project_root(filepath: str) -> Optional[str]:
-    """Walk up from filepath to find the project root."""
+def _find_project_root(filepath: str, language: Optional[str] = None) -> Optional[str]:
+    """Walk up from filepath to find the project root.
+
+    If language is provided, only checks that language's root patterns
+    for efficiency. Falls back to checking all languages if language is None.
+    """
     path = Path(filepath).resolve()
     for parent in [path] + list(path.parents):
-        for lang, config in LANGUAGE_SERVERS.items():
-            for pattern in config["root_patterns"]:
+        if language and language in LANGUAGE_SERVERS:
+            for pattern in LANGUAGE_SERVERS[language]["root_patterns"]:
                 if (parent / pattern).exists():
                     return str(parent)
+        else:
+            for lang, config in LANGUAGE_SERVERS.items():
+                for pattern in config["root_patterns"]:
+                    if (parent / pattern).exists():
+                        return str(parent)
     return str(path.parent) if path.parent else None
 
 
@@ -964,17 +978,17 @@ class LSPManager:
         self._read_buf: Dict[str, bytes] = {}  # per-client leftover buffer
         self._root_cache: Dict[str, str] = {}  # filepath -> project_root cache
         self._server_cache: Dict[str, bool] = {}  # command -> available cache
-        self._server_cache_ttl: float = 60.0  # seconds
+        self._server_cache_ttl: float = LSP_SERVER_CACHE_TTL
         self._last_server_check: float = 0.0
         self._eviction_thread: Optional[threading.Thread] = None
-        self._eviction_interval: float = 60.0  # seconds between eviction sweeps
+        self._eviction_interval: float = LSP_EVICTION_INTERVAL
         self._known_roots: List[str] = []  # ordered list of project roots (insertion order = LRU)
         self._known_roots_lock: threading.Lock = threading.Lock()  # thread-safe access to _known_roots
-        self._known_roots_max: int = 50  # max roots before LRU eviction
+        self._known_roots_max: int = LSP_KNOWN_ROOTS_MAX
         self._cross_repo_cache: Dict[str, Tuple[float, Optional[Dict[str, Any]]]] = {}  # symbol_key -> (timestamp, result)
         self._cross_repo_cache_lock: threading.Lock = threading.Lock()  # thread-safe access to cache
-        self._cross_repo_cache_ttl: float = 30.0  # seconds before re-checking
-        self._cross_repo_cache_max: int = 100  # max entries before LRU eviction
+        self._cross_repo_cache_ttl: float = LSP_CROSS_REPO_CACHE_TTL
+        self._cross_repo_cache_max: int = LSP_CROSS_REPO_CACHE_MAX
 
     def ensure_started(self) -> None:
         """Ensure the manager is initialized (thread-safe)."""
@@ -1032,11 +1046,11 @@ class LSPManager:
             self._server_cache[cmd_key] = _check_server_available(command)
         return self._server_cache[cmd_key]
 
-    def _find_project_root_cached(self, filepath: str) -> Optional[str]:
+    def _find_project_root_cached(self, filepath: str, language: Optional[str] = None) -> Optional[str]:
         """Find project root with caching."""
         if filepath in self._root_cache:
             return self._root_cache[filepath]
-        root = _find_project_root(filepath)
+        root = _find_project_root(filepath, language)
         if root:
             self._root_cache[filepath] = root
         return root
@@ -1047,7 +1061,7 @@ class LSPManager:
         if language is None:
             return None
 
-        project_root = self._find_project_root_cached(filepath)
+        project_root = self._find_project_root_cached(filepath, language)
         if project_root is None:
             return None
 
@@ -1163,7 +1177,7 @@ class LSPManager:
         if language is None:
             return None
 
-        project_root = self._find_project_root_cached(filepath)
+        project_root = self._find_project_root_cached(filepath, language)
         if project_root is None:
             return None
 
@@ -1179,6 +1193,8 @@ class LSPManager:
 
         for other_client in self._get_cross_repo_clients(language, project_root):
             try:
+                if other_client._stopped:
+                    continue
                 other_client.open_file(filepath)
                 if method == "definition":
                     result = other_client.goto_definition(filepath, line, character)
@@ -1186,6 +1202,8 @@ class LSPManager:
                     result = other_client.get_hover(filepath, line, character)
                 else:
                     result = None
+                # Close the file in the other server to prevent file handle leaks
+                other_client.close_file(filepath)
                 if result is not None:
                     self._cross_repo_cache_set(cache_key, result)
                     return result
@@ -1698,106 +1716,128 @@ def _handle_lsp_auto_fix(args: dict, **kwargs: Any) -> str:
     if not filepath:
         return json.dumps({"success": False, "error": "filepath is required"})
 
-    manager = get_manager()
-    manager.ensure_started()
+    try:
+        manager = get_manager()
+        manager.ensure_started()
 
-    diagnostics = manager.get_diagnostics(filepath)
+        diagnostics = manager.get_diagnostics(filepath)
 
-    if diagnostic_index is not None:
-        if diagnostic_index < 0 or diagnostic_index >= len(diagnostics):
+        if diagnostic_index is not None:
+            if diagnostic_index < 0 or diagnostic_index >= len(diagnostics):
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"Diagnostic index {diagnostic_index} out of range (0-{len(diagnostics) - 1})",
+                    }
+                )
+            diag = diagnostics[diagnostic_index]
+            actions = manager.get_code_actions(filepath, diag)
             return json.dumps(
                 {
-                    "success": False,
-                    "error": f"Diagnostic index {diagnostic_index} out of range (0-{len(diagnostics) - 1})",
-                }
-            )
-        diag = diagnostics[diagnostic_index]
-        actions = manager.get_code_actions(filepath, diag)
-        return json.dumps(
-            {
-                "success": True,
-                "filepath": filepath,
-                "diagnostic": diag,
-                "fixes": actions,
-            }
-        )
-
-    # Return all diagnostics with their fix counts
-    results = []
-    for i, diag in enumerate(diagnostics):
-        actions = manager.get_code_actions(filepath, diag)
-        if actions:
-            results.append(
-                {
-                    "index": i,
+                    "success": True,
+                    "filepath": filepath,
                     "diagnostic": diag,
                     "fixes": actions,
                 }
             )
 
-    return json.dumps(
-        {
-            "success": True,
-            "filepath": filepath,
-            "fixable_count": len(results),
-            "fixes": results,
-        }
-    )
+        # Return all diagnostics with their fix counts
+        results = []
+        for i, diag in enumerate(diagnostics):
+            actions = manager.get_code_actions(filepath, diag)
+            if actions:
+                results.append(
+                    {
+                        "index": i,
+                        "diagnostic": diag,
+                        "fixes": actions,
+                    }
+                )
+
+        return json.dumps(
+            {
+                "success": True,
+                "filepath": filepath,
+                "fixable_count": len(results),
+                "fixes": results,
+            }
+        )
+    except Exception as e:
+        return json.dumps(
+            {
+                "success": False,
+                "error": {
+                    "_tag": "UnhandledError",
+                    "message": str(e),
+                },
+            }
+        )
 
 
 def _handle_lsp_servers(args: dict, **kwargs: Any) -> str:
     """Handle lsp_servers tool call."""
     action = args.get("action", "list")
 
-    manager = get_manager()
-    manager.ensure_started()
+    try:
+        manager = get_manager()
+        manager.ensure_started()
 
-    if action == "status":
-        # Show running clients
-        # Collect client snapshots under manager lock, then read per-client
-        # state outside the lock to avoid deadlock with reader thread.
-        client_snapshots = []
-        with manager._lock:
-            for key, client in manager._clients.items():
-                client_snapshots.append((key, client))
-        clients = []
-        for key, client in client_snapshots:
-            with client._open_files_lock:
-                open_files = list(client._open_files)
-            with client._diag_lock:
-                diag_count = sum(len(d) for d in client._diagnostics.values())
-            clients.append(
+        if action == "status":
+            # Show running clients
+            # Collect client snapshots under manager lock, then read per-client
+            # state outside the lock to avoid deadlock with reader thread.
+            client_snapshots = []
+            with manager._lock:
+                for key, client in manager._clients.items():
+                    client_snapshots.append((key, client))
+            clients = []
+            for key, client in client_snapshots:
+                with client._open_files_lock:
+                    open_files = list(client._open_files)
+                with client._diag_lock:
+                    diag_count = sum(len(d) for d in client._diagnostics.values())
+                clients.append(
+                    {
+                        "key": key,
+                        "language": client.language,
+                        "server": client.server_name,
+                        "project_root": client.project_root,
+                        "initialized": client._initialized,
+                        "open_files": open_files,
+                        "diagnostic_count": diag_count,
+                    }
+                )
+            return json.dumps(
                 {
-                    "key": key,
-                    "language": client.language,
-                    "server": client.server_name,
-                    "project_root": client.project_root,
-                    "initialized": client._initialized,
-                    "open_files": open_files,
-                    "diagnostic_count": diag_count,
+                    "success": True,
+                    "running_clients": len(clients),
+                    "clients": clients,
                 }
             )
+
+        # List all known servers
+        servers = manager.get_available_servers()
+        available = [s for s in servers if s["available"]]
+        unavailable = [s for s in servers if not s["available"]]
+
         return json.dumps(
             {
                 "success": True,
-                "running_clients": len(clients),
-                "clients": clients,
+                "available": available,
+                "unavailable": unavailable,
+                "summary": f"{len(available)} available, {len(unavailable)} not installed",
             }
         )
-
-    # List all known servers
-    servers = manager.get_available_servers()
-    available = [s for s in servers if s["available"]]
-    unavailable = [s for s in servers if not s["available"]]
-
-    return json.dumps(
-        {
-            "success": True,
-            "available": available,
-            "unavailable": unavailable,
-            "summary": f"{len(available)} available, {len(unavailable)} not installed",
-        }
-    )
+    except Exception as e:
+        return json.dumps(
+            {
+                "success": False,
+                "error": {
+                    "_tag": "UnhandledError",
+                    "message": str(e),
+                },
+            }
+        )
 
 
 def _handle_lsp_verify(args: dict, **kwargs: Any) -> str:
@@ -1856,64 +1896,67 @@ def _handle_lsp_verify(args: dict, **kwargs: Any) -> str:
 
 def _cmd_lsp(raw_args: str) -> str:
     """Handle the /lsp slash command."""
-    parts = raw_args.strip().split(maxsplit=1)
-    subcommand = parts[0] if parts else "status"
-    arg = parts[1] if len(parts) > 1 else ""
+    try:
+        parts = raw_args.strip().split(maxsplit=1)
+        subcommand = parts[0] if parts else "status"
+        arg = parts[1] if len(parts) > 1 else ""
 
-    manager = get_manager()
-    manager.ensure_started()
+        manager = get_manager()
+        manager.ensure_started()
 
-    if subcommand == "servers":
-        servers = manager.get_available_servers()
-        lines = ["## LSP Servers"]
-        for s in servers:
-            status = "✓" if s["available"] else "✗"
-            lines.append(f"  {status} {s['name']} ({s['language']})")
-            if not s["available"]:
-                lines.append(f"     Install: {s['install_hint']}")
-        return "\n".join(lines)
+        if subcommand == "servers":
+            servers = manager.get_available_servers()
+            lines = ["## LSP Servers"]
+            for s in servers:
+                status = "✓" if s["available"] else "✗"
+                lines.append(f"  {status} {s['name']} ({s['language']})")
+                if not s["available"]:
+                    lines.append(f"     Install: {s['install_hint']}")
+            return "\n".join(lines)
 
-    elif subcommand == "diagnostics":
-        if not arg:
-            return "Usage: /lsp diagnostics <filepath>"
-        diagnostics = manager.get_diagnostics(arg)
-        if not diagnostics:
-            return f"No diagnostics for {arg}"
-        lines = [f"## Diagnostics for {arg}"]
-        for d in diagnostics:
-            sev = {1: "ERROR", 2: "WARN", 3: "INFO", 4: "HINT"}.get(
-                d.get("severity", 0), "?"
-            )
-            r = d.get("range", {})
-            loc = f"{r.get('start', {}).get('line', 0)}:{r.get('start', {}).get('character', 0)}"
-            lines.append(f"  [{sev}] {loc} — {d.get('message', '')}")
-        return "\n".join(lines)
+        elif subcommand == "diagnostics":
+            if not arg:
+                return "Usage: /lsp diagnostics <filepath>"
+            diagnostics = manager.get_diagnostics(arg)
+            if not diagnostics:
+                return f"No diagnostics for {arg}"
+            lines = [f"## Diagnostics for {arg}"]
+            for d in diagnostics:
+                sev = {1: "ERROR", 2: "WARN", 3: "INFO", 4: "HINT"}.get(
+                    d.get("severity", 0), "?"
+                )
+                r = d.get("range", {})
+                loc = f"{r.get('start', {}).get('line', 0)}:{r.get('start', {}).get('character', 0)}"
+                lines.append(f"  [{sev}] {loc} — {d.get('message', '')}")
+            return "\n".join(lines)
 
-    else:
-        # Status
-        # Collect client snapshots under manager lock, then read per-client
-        # state outside the lock to avoid deadlock with reader thread.
-        client_snapshots = []
-        with manager._lock:
-            for key, client in manager._clients.items():
-                client_snapshots.append((key, client))
-        clients = []
-        for key, client in client_snapshots:
-            with client._open_files_lock:
-                open_count = len(client._open_files)
-            clients.append(
-                f"  {client.language} ({client.server_name}) @ {client.project_root}"
-                f" — {open_count} files open"
-            )
-        servers = manager.get_available_servers()
-        available = sum(1 for s in servers if s["available"])
+        else:
+            # Status
+            # Collect client snapshots under manager lock, then read per-client
+            # state outside the lock to avoid deadlock with reader thread.
+            client_snapshots = []
+            with manager._lock:
+                for key, client in manager._clients.items():
+                    client_snapshots.append((key, client))
+            clients = []
+            for key, client in client_snapshots:
+                with client._open_files_lock:
+                    open_count = len(client._open_files)
+                clients.append(
+                    f"  {client.language} ({client.server_name}) @ {client.project_root}"
+                    f" — {open_count} files open"
+                )
+            servers = manager.get_available_servers()
+            available = sum(1 for s in servers if s["available"])
 
-        lines = [
-            "## LSP Status",
-            f"Running clients: {len(clients)}",
-            f"Available servers: {available}/{len(servers)}",
-        ]
-        if clients:
-            lines.append("")
-            lines.extend(clients)
-        return "\n".join(lines)
+            lines = [
+                "## LSP Status",
+                f"Running clients: {len(clients)}",
+                f"Available servers: {available}/{len(servers)}",
+            ]
+            if clients:
+                lines.append("")
+                lines.extend(clients)
+            return "\n".join(lines)
+    except Exception as e:
+        return f"Error: {e}"

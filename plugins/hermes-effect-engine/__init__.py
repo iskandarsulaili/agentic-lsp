@@ -1414,10 +1414,15 @@ async def _handle_effect_scope(args: dict, **kwargs: Any) -> str:
                 proc = subprocess.run(c, shell=True, capture_output=True, text=True, timeout=EFFECT_SHELL_TIMEOUT)
                 return f"[{n}] exit={proc.returncode} stdout={proc.stdout[:200]}"
 
-            fiber = await scope.fork(_run_cmd(), name=op_name)
-            fiber_results.append(
-                {"id": fiber.id, "name": fiber.name, "status": fiber.status.value}
-            )
+            try:
+                fiber = await scope.fork(_run_cmd(), name=op_name)
+                fiber_results.append(
+                    {"id": fiber.id, "name": fiber.name, "status": fiber.status.value}
+                )
+            except Exception as e:
+                fiber_results.append(
+                    {"id": "error", "name": op_name, "status": "failed", "error": str(e)}
+                )
 
         return json.dumps({"success": True, "fibers": fiber_results})
 
@@ -1512,7 +1517,7 @@ def _handle_effect_service(args: dict, **kwargs: Any) -> str:
                     "deps": deps,
                 }
             )
-        except DependencyError as e:
+        except (DependencyError, ValidationFailedError) as e:
             return json.dumps({"success": False, "error": e.to_dict()})
 
     elif action == "resolve":
@@ -1558,3 +1563,5 @@ def _cmd_effect(raw_args: str) -> str:
         return effect.run()
     except TypedError as e:
         return f"Error: {e}"
+    except Exception as e:
+        return f"Unexpected error: {e}"
