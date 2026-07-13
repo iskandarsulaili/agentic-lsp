@@ -139,6 +139,7 @@ class _SembleEngine:
         Returns the SembleIndex for *path*, building and caching it on first access.
         Cached indexes are evicted LRU when ``_CACHE_MAX_SIZE`` is exceeded.
         Indexing is wrapped with a timeout to prevent hangs on very large repos.
+        Model loading happens outside the lock so it doesn't block other cache lookups.
         """
         cache_key = str(Path(path).resolve())
 
@@ -149,8 +150,15 @@ class _SembleEngine:
                 self._touch(cache_key)
                 return cached
 
-            # Ensure model is loaded
-            model_path = self._ensure_model()
+        # Ensure model is loaded (outside lock — model download can take 4-30s)
+        model_path = self._ensure_model()
+
+        with self._lock:
+            # Double-check under lock after model load
+            cached = self._indexes.get(cache_key)
+            if cached is not None:
+                self._touch(cache_key)
+                return cached
 
             self._evict_lru()
 

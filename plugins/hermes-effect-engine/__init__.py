@@ -1306,7 +1306,7 @@ async def _handle_effect_run(args: dict, **kwargs: Any) -> str:
                     shell=True,
                     capture_output=True,
                     text=True,
-                    timeout=min(30, max(1, int((deadline - time.time()) * 0.8))),
+                    timeout=min(EFFECT_SHELL_TIMEOUT, max(1, int((deadline - time.time()) * 0.8))),
                 )
                 results.append(
                     {
@@ -1552,6 +1552,16 @@ def _handle_effect_service(args: dict, **kwargs: Any) -> str:
             )
         except (DependencyError, ValidationFailedError) as e:
             return json.dumps({"success": False, "error": e.to_dict()})
+        except Exception as e:
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": {
+                        "_tag": "UnhandledError",
+                        "message": str(e),
+                    },
+                }
+            )
 
     elif action == "resolve":
         if not name:

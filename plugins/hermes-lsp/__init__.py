@@ -322,7 +322,6 @@ class LSPClient:
     process: Optional[subprocess.Popen] = None
     _pending_requests: Dict[str, Tuple[threading.Event, list, list]] = field(default_factory=dict)
     _request_id: int = 0
-    _capabilities: Dict[str, Any] = field(default_factory=dict)
     _initialized: bool = False
     _read_thread: Optional[threading.Thread] = None
     _lock: threading.Lock = field(default_factory=threading.Lock)
@@ -408,7 +407,6 @@ class LSPClient:
         if result is None:
             return False
 
-        self._capabilities = result.get("capabilities", {})
         self._send_notification("initialized", {})
         self._initialized = True
         return True
