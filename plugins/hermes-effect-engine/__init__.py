@@ -1388,16 +1388,27 @@ async def _handle_effect_scope(args: dict, **kwargs: Any) -> str:
         )
 
     elif action == "status":
-        return json.dumps(
-            {
-                "success": True,
-                "scope": {
-                    "name": scope.name,
-                    "fiber_count": scope.fiber_count(),
-                    "closed": scope.is_closed(),
-                },
-            }
-        )
+        try:
+            return json.dumps(
+                {
+                    "success": True,
+                    "scope": {
+                        "name": scope.name,
+                        "fiber_count": scope.fiber_count(),
+                        "closed": scope.is_closed(),
+                    },
+                }
+            )
+        except Exception as e:
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": {
+                        "_tag": "UnhandledError",
+                        "message": str(e),
+                    },
+                }
+            )
 
     elif action == "fork":
         if not operations:

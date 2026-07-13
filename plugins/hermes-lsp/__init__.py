@@ -678,6 +678,9 @@ class LSPClient:
 
         Uses threading.Event for cross-thread sync instead of asyncio.Future,
         which requires a running event loop. This works from any thread.
+
+        stdin.write is done inside the lock to prevent TOCTOU race with
+        stop() closing the pipe between the health check and the write.
         """
         # Check process health before writing
         if not self.process or self.process.poll() is not None:
@@ -694,40 +697,46 @@ class LSPClient:
             error_box: list = []
             self._pending_requests[req_id] = (event, result_box, error_box)
 
-        try:
-            if self.process.stdin:
-                self.process.stdin.write(msg + "\n")
-                self.process.stdin.flush()
-
-            # Wait for response (with timeout)
-            if not event.wait(timeout=LSP_REQUEST_TIMEOUT):
-                logger.warning("LSP request '%s' timed out for %s", method, self.language)
-                with self._lock:
+            # Write inside the lock to prevent TOCTOU race with stop()
+            try:
+                if self.process and self.process.stdin:
+                    self.process.stdin.write(msg + "\n")
+                    self.process.stdin.flush()
+                else:
                     self._pending_requests.pop(req_id, None)
+                    return None
+            except Exception as e:
+                self._pending_requests.pop(req_id, None)
+                logger.debug("LSP request '%s' failed: %s", method, e)
                 return None
 
-            if error_box:
-                logger.debug("LSP request '%s' error: %s", method, error_box[0])
-                return None
-            return result_box[0] if result_box else None
-
-        except Exception as e:
-            logger.debug("LSP request '%s' failed: %s", method, e)
+        # Wait for response (with timeout) — outside lock to avoid blocking
+        if not event.wait(timeout=LSP_REQUEST_TIMEOUT):
+            logger.warning("LSP request '%s' timed out for %s", method, self.language)
             with self._lock:
                 self._pending_requests.pop(req_id, None)
             return None
 
+        if error_box:
+            logger.debug("LSP request '%s' error: %s", method, error_box[0])
+            return None
+        return result_box[0] if result_box else None
+
     def _send_notification(self, method: str, params: Any = None) -> None:
-        """Send a notification (no response expected)."""
+        """Send a notification (no response expected).
+
+        Uses a lock to prevent TOCTOU race with stop() closing the pipe.
+        """
         if not self.process or self.process.poll() is not None:
             return
         msg = _make_notification(method, params)
-        try:
-            if self.process.stdin:
-                self.process.stdin.write(msg + "\n")
-                self.process.stdin.flush()
-        except Exception as e:
-            logger.debug("LSP notification '%s' failed: %s", method, e)
+        with self._lock:
+            try:
+                if self.process and self.process.stdin:
+                    self.process.stdin.write(msg + "\n")
+                    self.process.stdin.flush()
+            except Exception as e:
+                logger.debug("LSP notification '%s' failed: %s", method, e)
 
     def _read_loop(self) -> None:
         """Background thread: read JSON-RPC responses from the server.
