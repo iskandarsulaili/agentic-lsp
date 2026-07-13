@@ -578,8 +578,8 @@ def _handle_graphify_query(args: dict, **kwargs: Any) -> str:
 
     question = args.get("question", "")
     repo = args.get("repo", "")
-    depth = args.get("depth", _DEFAULT_QUERY_DEPTH)
-    token_budget = args.get("token_budget", _DEFAULT_TOKEN_BUDGET)
+    depth = max(1, min(args.get("depth", _DEFAULT_QUERY_DEPTH), 6))
+    token_budget = max(100, min(args.get("token_budget", _DEFAULT_TOKEN_BUDGET), 10000))
 
     if not question:
         return json.dumps({"success": False, "error": "question is required"})
@@ -606,7 +606,7 @@ def _handle_graphify_path(args: dict, **kwargs: Any) -> str:
     source = args.get("source", "")
     target = args.get("target", "")
     repo = args.get("repo", "")
-    max_hops = args.get("max_hops", 8)
+    max_hops = max(1, min(args.get("max_hops", 8), 20))
 
     if not source or not target:
         return json.dumps({"success": False, "error": "source and target are required"})
@@ -740,7 +740,7 @@ def _handle_graphify_god_nodes(args: dict, **kwargs: Any) -> str:
     if not _engine.available():
         return json.dumps({"success": False, "error": _engine.import_error()})
 
-    top_n = args.get("top_n", 10)
+    top_n = max(1, min(args.get("top_n", 10), 100))
     repo = args.get("repo", "")
 
     try:

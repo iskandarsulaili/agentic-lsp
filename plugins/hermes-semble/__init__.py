@@ -343,8 +343,10 @@ def _handle_semble_search(args: dict, **kwargs: Any) -> str:
 
     query = args.get("query", "")
     repo = _resolve_repo(args.get("repo", ""))
-    top_k = args.get("top_k", _DEFAULT_TOP_K)
+    top_k = max(1, min(args.get("top_k", _DEFAULT_TOP_K), 50))
     max_snippet_lines = args.get("max_snippet_lines", _DEFAULT_MAX_SNIPPET_LINES)
+    if max_snippet_lines is not None and max_snippet_lines < 0:
+        max_snippet_lines = _DEFAULT_MAX_SNIPPET_LINES
     filter_languages = args.get("filter_languages", None)
     filter_paths = args.get("filter_paths", None)
 
@@ -377,9 +379,13 @@ def _handle_semble_find_related(args: dict, **kwargs: Any) -> str:
 
     file_path = args.get("file_path", "")
     line = args.get("line", 0)
+    if line < 0:
+        line = 0
     repo = _resolve_repo(args.get("repo", ""))
-    top_k = args.get("top_k", _DEFAULT_TOP_K)
+    top_k = max(1, min(args.get("top_k", _DEFAULT_TOP_K), 50))
     max_snippet_lines = args.get("max_snippet_lines", _DEFAULT_MAX_SNIPPET_LINES)
+    if max_snippet_lines is not None and max_snippet_lines < 0:
+        max_snippet_lines = _DEFAULT_MAX_SNIPPET_LINES
 
     if not file_path:
         return json.dumps({"success": False, "error": "file_path is required"})

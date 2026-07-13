@@ -1255,6 +1255,10 @@ async def _handle_effect_run(args: dict, **kwargs: Any) -> str:
     steps = args.get("steps", [])
     timeout_ms = args.get("timeout_ms", EFFECT_DEFAULT_TIMEOUT_MS)
 
+    # Cap steps to prevent excessive iteration
+    if len(steps) > 100:
+        steps = steps[:100]
+
     # Validate timeout
     if timeout_ms <= 0:
         timeout_ms = EFFECT_DEFAULT_TIMEOUT_MS
@@ -1427,6 +1431,10 @@ async def _handle_effect_scope(args: dict, **kwargs: Any) -> str:
                 {"success": False, "error": "No operations provided for fork"}
             )
 
+        # Cap operations to prevent excessive fiber creation
+        if len(operations) > 20:
+            operations = operations[:20]
+
         fiber_results = []
         for op in operations:
             op_name = op.get("name", "anonymous")
@@ -1496,14 +1504,26 @@ async def _handle_effect_scope(args: dict, **kwargs: Any) -> str:
                 {"success": False, "error": f"Fiber not found: {fiber_id}"}
             )
 
-        fiber.interrupt()
-        return json.dumps(
-            {
-                "success": True,
-                "fiber_id": fiber.id,
-                "status": fiber.status.value,
-            }
-        )
+        try:
+            fiber.interrupt()
+            return json.dumps(
+                {
+                    "success": True,
+                    "fiber_id": fiber.id,
+                    "status": fiber.status.value,
+                }
+            )
+        except Exception as e:
+            return json.dumps(
+                {
+                    "success": False,
+                    "fiber_id": fiber.id,
+                    "error": {
+                        "_tag": "UnhandledError",
+                        "message": str(e),
+                    },
+                }
+            )
 
     return json.dumps({"success": False, "error": f"Unknown action: {action}"})
 
