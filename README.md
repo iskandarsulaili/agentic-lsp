@@ -6,11 +6,11 @@
 </p>
 
 <p align="center">
-  <b>OpenCode's architecture advantages — as Hermes plugins.</b>
+  <b>OpenCode's two key architecture advantages for agentic coding — as Hermes plugins.</b>
 </p>
 
 <p align="center">
-  LSP code intelligence • Effect-ts typed errors • Structured concurrency • DI container
+  Effect-ts functional core • LSP code intelligence • Zero external deps • Thread-safe
 </p>
 
 <p align="center">
@@ -30,12 +30,13 @@
 
 ---
 
-**agentic-lsp** gives Hermes the two architectural advantages that make OpenCode powerful for agentic coding:
+**agentic-lsp** brings the two architecture decisions that make OpenCode effective for agentic coding to Hermes:
 
-1. **Effect-ts-style functional core** — typed errors, structured concurrency, dependency injection, composable effects. Tool chains that can't fail silently because every error type is tracked.
-2. **LSP code intelligence** — real-time diagnostics, completions, hover, go-to-definition, auto-fix. The agent self-corrects after every edit instead of shipping broken code.
+**1. Effect-ts functional architecture** — OpenCode uses Effect-ts (TypeScript) to make every operation composable, typed, and error-tracked. agentic-lsp replicates this in pure Python: typed errors with `_tag` discriminators, a DI container with cycle detection, structured concurrency via Scope + Fiber, and composable Effect chains. Tool calls that can't fail silently — every error type is tracked and catchable.
 
-Both are **pure Python, zero external dependencies** (stdlib only). They install in seconds and survive Hermes updates because they live in `~/.hermes/plugins/`, not in Hermes's core. All timeouts and limits are configurable via `.env` — no hardcoded settings.
+**2. LSP code intelligence** — OpenCode uses LSP for real-time diagnostics after every edit. agentic-lsp does the same: 7 Hermes tools for diagnostics, completions, hover, go-to-definition, and auto-fix. The agent self-corrects before shipping broken code. Plus agentic-lsp adds cross-repo fallback, idle client eviction, and thread safety that OpenCode doesn't have.
+
+Both plugins are **pure Python, zero external dependencies** (stdlib only). They install in seconds and survive Hermes updates because they live in `~/.hermes/plugins/`, not in Hermes's core. All timeouts, limits, and cache sizes are configurable via `.env` — no hardcoded settings.
 
 ## ✨ Features
 
@@ -274,5 +275,25 @@ MIT
 ---
 
 <p align="center">
-  <b>agentic-lsp</b> — OpenCode's architecture, for Hermes.
+  <b>agentic-lsp</b> — OpenCode's two architecture advantages, replicated for Hermes.
 </p>
+
+## 📊 What This Replicates from OpenCode
+
+| OpenCode Feature | Replicated? | Notes |
+|-----------------|-------------|-------|
+| Effect-ts `Effect<A, E, R>` | ✓ | `Effect[T, E]` — compose, map, flatMap, catch, retry, withTimeout |
+| Effect-ts `Schema.TaggedError` | ✓ | `TypedError` — tagged errors with `_tag`, JSON round-trip |
+| Effect-ts `Layer` (DI container) | ✓ | `ServiceContainer` — register, resolve, cycle detection |
+| Effect-ts `Scope` + `Fiber` | ✓ | `Scope` + `Fiber` — fork, join, interrupt on scope exit |
+| Effect-ts `Context` | ✗ | Python doesn't require context bundles — services resolve directly |
+| LSP diagnostics | ✓ | `lsp_verify` tool — opens file, gets diagnostics, pass/fail |
+| LSP completions | ✓ | `lsp_completions` tool |
+| LSP hover | ✓ | `lsp_hover` tool |
+| LSP go-to-definition | ✓ | `lsp_definition` tool — single-workspace in OpenCode, cross-repo here |
+| LSP code actions | ✓ | `lsp_auto_fix` tool — OpenCode doesn't expose code actions |
+| LSP formatting | ✓ | Via `lsp_auto_fix` — OpenCode doesn't expose formatter |
+| Rich terminal TUI | ✗ | Hermes is a CLI agent not a TUI app |
+| Vercel AI SDK streaming | ✗ | Hermes uses its own provider abstraction, not Vercel SDK |
+| Durable Session V2 | ✗ | Hermes has its own session management |
+| Monorepo build | ✗ | Published as standalone plugins (survives updates) |
