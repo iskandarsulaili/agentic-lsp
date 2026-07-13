@@ -30,13 +30,15 @@
 
 ---
 
-**agentic-lsp** brings OpenCode's architecture advantages for agentic coding to Hermes — and adds Semble for whole-repo code search:
+**agentic-lsp** brings OpenCode's architecture advantages for agentic coding to Hermes — and adds Semble for whole-repo code search and Graphify for structural understanding:
 
 **1. Effect-ts functional architecture** — OpenCode uses Effect-ts (TypeScript) to make every operation composable, typed, and error-tracked. agentic-lsp replicates this in pure Python: typed errors with `_tag` discriminators, a DI container with cycle detection, structured concurrency via Scope + Fiber, and composable Effect chains. Tool calls that can't fail silently — every error type is tracked and catchable.
 
 **2. LSP code intelligence** — OpenCode uses LSP for real-time diagnostics after every edit. agentic-lsp does the same: 7 Hermes tools for diagnostics, completions, hover, go-to-definition, and auto-fix. The agent self-corrects before shipping broken code. Plus agentic-lsp adds cross-repo fallback, idle client eviction, and thread safety that OpenCode doesn't have.
 
 **3. Semble code search** — Whole-repo hybrid search (BM25 + semantic). Fast concept lookup that grep can't do. Complements grep+read: Semble for concepts, grep for exact patterns, read for context.
+
+**4. Graphify knowledge graph** — Structural code understanding via dependency graphs. Query relationships, trace call chains, find subsystems, and explain concepts. Complements LSP (per-file depth) and Semble (semantic search) with structural relationships.
 
 Both plugins are **pure Python, zero external dependencies** (stdlib only). They install in seconds and survive Hermes updates because they live in `~/.hermes/plugins/`, not in Hermes's core. All timeouts, limits, and cache sizes are configurable via `.env` — no hardcoded settings.
 
@@ -293,7 +295,56 @@ pip install semble
 ### Enable Plugin
 
 ```bash
-hermes config set plugins.enabled '["hermes-lsp","hermes-effect-engine","hermes-semble"]'
+hermes config set plugins.enabled '["hermes-lsp","hermes-effect-engine","hermes-semble","hermes-graphify"]'
+```
+
+### Graphify Knowledge Graph
+
+Structural code understanding via dependency graphs. Complements LSP (per-file depth) and Semble (semantic search) with structural relationships.
+
+| Query type | Tool | Example |
+|-------------|------|---------|
+| Concept relationships | `graphify_query` | "how does auth connect to the database?" |
+| Shortest path | `graphify_path` | "UserService → DatabasePool" |
+| Explain a symbol | `graphify_explain` | "what does RateLimiter connect to?" |
+| Most connected nodes | `graphify_god_nodes` | "what are the core abstractions?" |
+| Graph statistics | `graphify_stats` | node/edge/community counts |
+| Find nodes | `graphify_find` | "find LSPClient in the graph" |
+| Subsystem contents | `graphify_community` | "what's in community 0?" |
+
+**7 Hermes tools** + `/graphify` slash command.
+
+### Install Graphify
+
+```bash
+pip install graphifyy
+```
+
+Then build a graph for your project:
+
+```bash
+cd /path/to/project
+python3 -c "
+from pathlib import Path
+from graphify.extract import extract, collect_files
+from graphify.build import build_from_json
+from graphify.cluster import cluster
+from networkx.readwrite import json_graph
+import json
+
+files = list(collect_files(Path('.')))
+result = extract(files)
+G = build_from_json(result)
+communities = cluster(G)
+for cid, nodes in communities.items():
+    for nid in nodes:
+        G.nodes[nid]['community'] = cid
+Path('graphify-out').mkdir(exist_ok=True)
+data = json_graph.node_link_data(G, edges='links')
+with open('graphify-out/graph.json', 'w') as f:
+    json.dump(data, f)
+print(f'Graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges, {len(communities)} communities')
+"
 ```
 
 ## 📄 License
