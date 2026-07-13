@@ -1380,12 +1380,23 @@ async def _handle_effect_scope(args: dict, **kwargs: Any) -> str:
     scope = get_scope()
 
     if action == "list":
-        return json.dumps(
-            {
-                "success": True,
-                "fibers": scope.list_fibers(),
-            }
-        )
+        try:
+            return json.dumps(
+                {
+                    "success": True,
+                    "fibers": scope.list_fibers(),
+                }
+            )
+        except Exception as e:
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": {
+                        "_tag": "UnhandledError",
+                        "message": str(e),
+                    },
+                }
+            )
 
     elif action == "status":
         try:
@@ -1507,8 +1518,19 @@ def _handle_effect_service(args: dict, **kwargs: Any) -> str:
     container = get_container()
 
     if action == "list":
-        services = container.list_services()
-        return json.dumps({"success": True, "services": services})
+        try:
+            services = container.list_services()
+            return json.dumps({"success": True, "services": services})
+        except Exception as e:
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": {
+                        "_tag": "UnhandledError",
+                        "message": str(e),
+                    },
+                }
+            )
 
     elif action == "register":
         if not name:

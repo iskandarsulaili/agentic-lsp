@@ -1044,23 +1044,36 @@ class LSPManager:
                 pass
 
     def _check_server_cached(self, command: List[str]) -> bool:
-        """Check server availability with caching."""
-        now = time.time()
-        if now - self._last_server_check > self._server_cache_ttl:
-            self._server_cache.clear()
-            self._last_server_check = now
+        """Check server availability with caching (thread-safe).
+
+        Cache check/update is under lock, but the subprocess call (slow)
+        happens outside the lock to avoid blocking other operations.
+        """
         cmd_key = " ".join(command)
-        if cmd_key not in self._server_cache:
-            self._server_cache[cmd_key] = _check_server_available(command)
-        return self._server_cache[cmd_key]
+        with self._lock:
+            now = time.time()
+            if now - self._last_server_check > self._server_cache_ttl:
+                self._server_cache.clear()
+                self._last_server_check = now
+            if cmd_key in self._server_cache:
+                return self._server_cache[cmd_key]
+
+        # Subprocess call outside lock (slow)
+        available = _check_server_available(command)
+
+        with self._lock:
+            self._server_cache[cmd_key] = available
+        return available
 
     def _find_project_root_cached(self, filepath: str, language: Optional[str] = None) -> Optional[str]:
-        """Find project root with caching."""
-        if filepath in self._root_cache:
-            return self._root_cache[filepath]
+        """Find project root with caching (thread-safe)."""
+        with self._lock:
+            if filepath in self._root_cache:
+                return self._root_cache[filepath]
         root = _find_project_root(filepath, language)
         if root:
-            self._root_cache[filepath] = root
+            with self._lock:
+                self._root_cache[filepath] = root
         return root
 
     def get_client_for_file(self, filepath: str) -> Optional[LSPClient]:
