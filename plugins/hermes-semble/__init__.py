@@ -436,20 +436,23 @@ def _handle_semble_reindex(args: dict, **kwargs: Any) -> str:
 
 def _handle_semble_status(args: dict, **kwargs: Any) -> str:
     """Handle semble_status tool — check if Semble is available and report engine state."""
-    available = _engine.available()
-    with _engine._lock:
-        model_loaded = _engine._model_loaded if available else False
-        cached_indexes = len(_engine._indexes) if available else 0
-    info = {
-        "available": available,
-        "model_loaded": model_loaded,
-        "cached_indexes": cached_indexes,
-        "max_cache_size": _CACHE_MAX_SIZE,
-        "cached_repos": _engine.cached_repos() if available else [],
-    }
-    if not available:
-        info["import_error"] = _engine.import_error()
-    return json.dumps({"success": True, **info})
+    try:
+        available = _engine.available()
+        with _engine._lock:
+            model_loaded = _engine._model_loaded if available else False
+            cached_indexes = len(_engine._indexes) if available else 0
+        info = {
+            "available": available,
+            "model_loaded": model_loaded,
+            "cached_indexes": cached_indexes,
+            "max_cache_size": _CACHE_MAX_SIZE,
+            "cached_repos": _engine.cached_repos() if available else [],
+        }
+        if not available:
+            info["import_error"] = _engine.import_error()
+        return json.dumps({"success": True, **info})
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
 
 
 # =============================================================================
