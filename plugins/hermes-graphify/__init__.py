@@ -25,10 +25,10 @@ import math
 import os
 import re
 import threading
-import time
 from array import array
+from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("hermes-graphify")
 
@@ -78,7 +78,7 @@ _DEFAULT_GRAPH_PATH = _env_str("HERMES_GRAPHIFY_GRAPH", "")
 _CACHE_MAX_SIZE = _env_int("HERMES_GRAPHIFY_CACHE_SIZE", 10)
 _DEFAULT_QUERY_DEPTH = _env_int("HERMES_GRAPHIFY_QUERY_DEPTH", 3)
 _DEFAULT_TOKEN_BUDGET = _env_int("HERMES_GRAPHIFY_TOKEN_BUDGET", 2000)
-_DEFAULT_TOP_K = _env_int("HERMES_GRAPHIFY_TOP_K", 5)
+_MAX_GRAPH_FILE_SIZE = _env_int("HERMES_GRAPHIFY_MAX_FILE_SIZE", 100 * 1024 * 1024)  # 100MB
 
 # =============================================================================
 # Graphify query engine (extracted from graphify/serve.py)
@@ -461,23 +461,18 @@ class _GraphEngine:
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
-        self._graphs: Dict[str, "nx.Graph"] = {}
-        self._graph_keys: list[str] = []  # LRU order
+        self._graphs: "OrderedDict[str, nx.Graph]" = OrderedDict()  # LRU-ordered cache
         self._graph_mtimes: Dict[str, tuple[int, int]] = {}  # path -> (mtime_ns, size)
 
     def _evict_lru(self) -> None:
+        """Evict the oldest index if at capacity (caller must hold lock)."""
         while len(self._graphs) >= _CACHE_MAX_SIZE:
-            oldest_key = self._graph_keys.pop(0) if self._graph_keys else None
-            if oldest_key:
-                self._graphs.pop(oldest_key, None)
-                self._graph_mtimes.pop(oldest_key, None)
-            else:
-                break
+            oldest_key, _ = self._graphs.popitem(last=False)
+            self._graph_mtimes.pop(oldest_key, None)
 
     def _touch(self, cache_key: str) -> None:
-        if cache_key in self._graph_keys:
-            self._graph_keys.remove(cache_key)
-        self._graph_keys.append(cache_key)
+        """Mark a cache key as recently used (caller must hold lock)."""
+        self._graphs.move_to_end(cache_key)
 
     def _load_graph(self, path: str) -> "nx.Graph":
         """Load a graph.json file and return a NetworkX graph."""
@@ -486,6 +481,13 @@ class _GraphEngine:
             raise ValueError(f"Graph path must be a .json file, got: {path!r}")
         if not resolved.exists():
             raise FileNotFoundError(f"Graph file not found: {resolved}")
+        # Check file size before loading into memory
+        file_size = resolved.stat().st_size
+        if file_size > _MAX_GRAPH_FILE_SIZE:
+            raise ValueError(
+                f"Graph file too large: {file_size} bytes exceeds "
+                f"HERMES_GRAPHIFY_MAX_FILE_SIZE={_MAX_GRAPH_FILE_SIZE}"
+            )
         data = json.loads(resolved.read_text(encoding="utf-8"))
         if "links" not in data and "edges" in data:
             data = dict(data, links=data["edges"])
@@ -539,16 +541,23 @@ _engine = _GraphEngine()
 # =============================================================================
 
 
+# Capture cwd at import time for stable default repo resolution
+_CWD = os.getcwd()
+
+
 def _resolve_graph_path(repo: str) -> str:
-    """Resolve graph path: if empty, use default env var; if a directory, look for graphify-out/graph.json."""
+    """Resolve graph path: if empty, use default env var; if a directory, look for graphify-out/graph.json.
+
+    Uses _CWD captured at import time so it's stable across the session.
+    """
     if not repo or repo.strip() == "":
         if _DEFAULT_GRAPH_PATH:
             return _DEFAULT_GRAPH_PATH
-        # Try cwd
-        cwd_graph = os.path.join(os.getcwd(), "graphify-out", "graph.json")
+        # Try cwd (captured at import time)
+        cwd_graph = os.path.join(_CWD, "graphify-out", "graph.json")
         if os.path.exists(cwd_graph):
             return cwd_graph
-        return os.path.join(os.getcwd(), "graphify-out", "graph.json")
+        return os.path.join(_CWD, "graphify-out", "graph.json")
 
     repo = repo.strip()
     p = Path(repo)
@@ -894,20 +903,23 @@ def _handle_graphify_community(args: dict, **kwargs: Any) -> str:
 
 def _cmd_graphify(raw_args: str) -> str:
     """Handle the /graphify slash command."""
-    parts = raw_args.strip().split(maxsplit=2)
+    parts = raw_args.strip().split(maxsplit=3)
     subcommand = parts[0] if parts else "status"
     arg1 = parts[1] if len(parts) > 1 else ""
     arg2 = parts[2] if len(parts) > 2 else ""
+    arg3 = parts[3] if len(parts) > 3 else ""
 
     if not _engine.available():
         return f"Error: {_engine.import_error()}"
 
     try:
         if subcommand == "status":
+            with _engine._lock:
+                cached_count = len(_engine._graphs)
             return (
                 f"Graphify: {'✓ available' if _engine.available() else '✗ unavailable'}\n"
                 f"Default graph: {_DEFAULT_GRAPH_PATH or 'not set (use repo= param)'}\n"
-                f"Cached graphs: {len(_engine._graphs)}"
+                f"Cached graphs: {cached_count}"
             )
 
         elif subcommand == "query":
@@ -921,8 +933,7 @@ def _cmd_graphify(raw_args: str) -> str:
         elif subcommand == "path":
             if not arg1 or not arg2:
                 return "Usage: /graphify path <source> <target> [repo]"
-            repo = parts[2] if len(parts) > 2 else ""
-            result = json.loads(_handle_graphify_path({"source": arg1, "target": arg2, "repo": repo}))
+            result = json.loads(_handle_graphify_path({"source": arg1, "target": arg2, "repo": arg3}))
             if not result.get("success"):
                 return f"Error: {result.get('error')}"
             return result.get("result", "No result")
