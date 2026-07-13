@@ -1549,8 +1549,19 @@ def _handle_effect_service(args: dict, **kwargs: Any) -> str:
             )
 
     elif action == "reset":
-        container.reset()
-        return json.dumps({"success": True, "message": "Container reset"})
+        try:
+            container.reset()
+            return json.dumps({"success": True, "message": "Container reset"})
+        except Exception as e:
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": {
+                        "_tag": "UnhandledError",
+                        "message": str(e),
+                    },
+                }
+            )
 
     return json.dumps({"success": False, "error": f"Unknown action: {action}"})
 

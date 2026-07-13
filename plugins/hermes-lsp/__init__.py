@@ -15,7 +15,6 @@ Uses stdio JSON-RPC to communicate with language servers (no pygls dependency).
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
@@ -25,6 +24,7 @@ import sys
 import threading
 import time
 import uuid
+from collections import deque, OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -975,17 +975,16 @@ class LSPManager:
         self._lock = threading.Lock()
         self._started = False
         self._stopped = False
-        self._read_buf: Dict[str, bytes] = {}  # per-client leftover buffer
         self._root_cache: Dict[str, str] = {}  # filepath -> project_root cache
         self._server_cache: Dict[str, bool] = {}  # command -> available cache
         self._server_cache_ttl: float = LSP_SERVER_CACHE_TTL
         self._last_server_check: float = 0.0
         self._eviction_thread: Optional[threading.Thread] = None
         self._eviction_interval: float = LSP_EVICTION_INTERVAL
-        self._known_roots: List[str] = []  # ordered list of project roots (insertion order = LRU)
+        self._known_roots: deque = deque()  # ordered list of project roots (insertion order = LRU)
         self._known_roots_lock: threading.Lock = threading.Lock()  # thread-safe access to _known_roots
         self._known_roots_max: int = LSP_KNOWN_ROOTS_MAX
-        self._cross_repo_cache: Dict[str, Tuple[float, Optional[Dict[str, Any]]]] = {}  # symbol_key -> (timestamp, result)
+        self._cross_repo_cache: OrderedDict[str, Tuple[float, Optional[Dict[str, Any]]]] = OrderedDict()  # symbol_key -> (timestamp, result)
         self._cross_repo_cache_lock: threading.Lock = threading.Lock()  # thread-safe access to cache
         self._cross_repo_cache_ttl: float = LSP_CROSS_REPO_CACHE_TTL
         self._cross_repo_cache_max: int = LSP_CROSS_REPO_CACHE_MAX
@@ -1070,7 +1069,7 @@ class LSPManager:
             if project_root not in self._known_roots:
                 self._known_roots.append(project_root)
                 if len(self._known_roots) > self._known_roots_max:
-                    self._known_roots.pop(0)  # evict oldest
+                    self._known_roots.popleft()  # evict oldest (O(1))
 
         key = f"{language}:{project_root}"
 
@@ -1150,12 +1149,11 @@ class LSPManager:
             return result
 
     def _cross_repo_cache_set(self, key: str, result: Optional[Dict[str, Any]]) -> None:
-        """Set cross-repo cache with LRU eviction."""
+        """Set cross-repo cache with LRU eviction (O(1) via OrderedDict)."""
         with self._cross_repo_cache_lock:
             if len(self._cross_repo_cache) >= self._cross_repo_cache_max:
-                # Evict oldest entry
-                oldest = min(self._cross_repo_cache.items(), key=lambda x: x[1][0])
-                del self._cross_repo_cache[oldest[0]]
+                # Evict oldest entry (O(1) via OrderedDict.popitem)
+                self._cross_repo_cache.popitem(last=False)
             self._cross_repo_cache[key] = (time.time(), result)
 
     def _cross_repo_fallback(
@@ -1600,112 +1598,124 @@ def register(ctx: Any) -> None:
 
 def _handle_lsp_diagnostics(args: dict, **kwargs: Any) -> str:
     """Handle lsp_diagnostics tool call."""
-    filepath = args.get("filepath", "")
-    content = args.get("content", None)
+    try:
+        filepath = args.get("filepath", "")
+        content = args.get("content", None)
 
-    if not filepath:
-        return json.dumps({"success": False, "error": "filepath is required"})
+        if not filepath:
+            return json.dumps({"success": False, "error": "filepath is required"})
 
-    manager = get_manager()
-    manager.ensure_started()
+        manager = get_manager()
+        manager.ensure_started()
 
-    if content is not None:
-        diagnostics = manager.refresh_diagnostics(filepath, content)
-    else:
-        diagnostics = manager.get_diagnostics(filepath)
+        if content is not None:
+            diagnostics = manager.refresh_diagnostics(filepath, content)
+        else:
+            diagnostics = manager.get_diagnostics(filepath)
 
-    errors = [d for d in diagnostics if d.get("severity") == 1]
-    warnings = [d for d in diagnostics if d.get("severity") == 2]
-    infos = [d for d in diagnostics if d.get("severity") in (3, 4)]
+        errors = [d for d in diagnostics if d.get("severity") == 1]
+        warnings = [d for d in diagnostics if d.get("severity") == 2]
+        infos = [d for d in diagnostics if d.get("severity") in (3, 4)]
 
-    return json.dumps(
-        {
-            "success": True,
-            "filepath": filepath,
-            "summary": {
-                "errors": len(errors),
-                "warnings": len(warnings),
-                "info": len(infos),
-                "total": len(diagnostics),
-            },
-            "errors": errors[:LSP_MAX_DIAGNOSTICS],
-            "warnings": warnings[:LSP_MAX_WARNINGS],
-            "info": infos[:LSP_MAX_INFO],
-        }
-    )
+        return json.dumps(
+            {
+                "success": True,
+                "filepath": filepath,
+                "summary": {
+                    "errors": len(errors),
+                    "warnings": len(warnings),
+                    "info": len(infos),
+                    "total": len(diagnostics),
+                },
+                "errors": errors[:LSP_MAX_DIAGNOSTICS],
+                "warnings": warnings[:LSP_MAX_WARNINGS],
+                "info": infos[:LSP_MAX_INFO],
+            }
+        )
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
 
 
 def _handle_lsp_completions(args: dict, **kwargs: Any) -> str:
     """Handle lsp_completions tool call."""
-    filepath = args.get("filepath", "")
-    line = args.get("line", 0)
-    character = args.get("character", 0)
+    try:
+        filepath = args.get("filepath", "")
+        line = args.get("line", 0)
+        character = args.get("character", 0)
 
-    if not filepath:
-        return json.dumps({"success": False, "error": "filepath is required"})
+        if not filepath:
+            return json.dumps({"success": False, "error": "filepath is required"})
 
-    manager = get_manager()
-    manager.ensure_started()
+        manager = get_manager()
+        manager.ensure_started()
 
-    completions = manager.get_completions(filepath, line, character)
+        completions = manager.get_completions(filepath, line, character)
 
-    return json.dumps(
-        {
-            "success": True,
-            "filepath": filepath,
-            "position": {"line": line, "character": character},
-            "completions": completions[:LSP_MAX_COMPLETIONS],
-            "total": len(completions),
-        }
-    )
+        return json.dumps(
+            {
+                "success": True,
+                "filepath": filepath,
+                "position": {"line": line, "character": character},
+                "completions": completions[:LSP_MAX_COMPLETIONS],
+                "total": len(completions),
+            }
+        )
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
 
 
 def _handle_lsp_hover(args: dict, **kwargs: Any) -> str:
     """Handle lsp_hover tool call."""
-    filepath = args.get("filepath", "")
-    line = args.get("line", 0)
-    character = args.get("character", 0)
+    try:
+        filepath = args.get("filepath", "")
+        line = args.get("line", 0)
+        character = args.get("character", 0)
 
-    if not filepath:
-        return json.dumps({"success": False, "error": "filepath is required"})
+        if not filepath:
+            return json.dumps({"success": False, "error": "filepath is required"})
 
-    manager = get_manager()
-    manager.ensure_started()
+        manager = get_manager()
+        manager.ensure_started()
 
-    hover = manager.get_hover(filepath, line, character)
+        hover = manager.get_hover(filepath, line, character)
 
-    return json.dumps(
-        {
-            "success": hover is not None,
-            "filepath": filepath,
-            "position": {"line": line, "character": character},
-            "hover": hover,
-        }
-    )
+        return json.dumps(
+            {
+                "success": hover is not None,
+                "filepath": filepath,
+                "position": {"line": line, "character": character},
+                "hover": hover,
+            }
+        )
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
 
 
 def _handle_lsp_definition(args: dict, **kwargs: Any) -> str:
     """Handle lsp_definition tool call."""
-    filepath = args.get("filepath", "")
-    line = args.get("line", 0)
-    character = args.get("character", 0)
+    try:
+        filepath = args.get("filepath", "")
+        line = args.get("line", 0)
+        character = args.get("character", 0)
 
-    if not filepath:
-        return json.dumps({"success": False, "error": "filepath is required"})
+        if not filepath:
+            return json.dumps({"success": False, "error": "filepath is required"})
 
-    manager = get_manager()
-    manager.ensure_started()
+        manager = get_manager()
+        manager.ensure_started()
 
-    definition = manager.goto_definition(filepath, line, character)
+        definition = manager.goto_definition(filepath, line, character)
 
-    return json.dumps(
-        {
-            "success": definition is not None,
-            "filepath": filepath,
-            "position": {"line": line, "character": character},
-            "definition": definition,
-        }
-    )
+        return json.dumps(
+            {
+                "success": definition is not None,
+                "filepath": filepath,
+                "position": {"line": line, "character": character},
+                "definition": definition,
+            }
+        )
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
 
 
 def _handle_lsp_auto_fix(args: dict, **kwargs: Any) -> str:
@@ -1842,56 +1852,59 @@ def _handle_lsp_servers(args: dict, **kwargs: Any) -> str:
 
 def _handle_lsp_verify(args: dict, **kwargs: Any) -> str:
     """Handle lsp_verify tool call — the key integration point."""
-    filepath = args.get("filepath", "")
-    content = args.get("content", "")
-    severity_threshold = args.get("severity_threshold", "warning")
+    try:
+        filepath = args.get("filepath", "")
+        content = args.get("content", "")
+        severity_threshold = args.get("severity_threshold", "warning")
 
-    if not filepath or not content:
-        return json.dumps({"success": False, "error": "filepath and content are required"})
+        if not filepath or not content:
+            return json.dumps({"success": False, "error": "filepath and content are required"})
 
-    severity_map = {"error": 1, "warning": 2, "information": 3, "hint": 4}
-    threshold = severity_map.get(severity_threshold, 2)
+        severity_map = {"error": 1, "warning": 2, "information": 3, "hint": 4}
+        threshold = severity_map.get(severity_threshold, 2)
 
-    manager = get_manager()
-    manager.ensure_started()
+        manager = get_manager()
+        manager.ensure_started()
 
-    diagnostics = manager.refresh_diagnostics(filepath, content)
+        diagnostics = manager.refresh_diagnostics(filepath, content)
 
-    errors = [d for d in diagnostics if d.get("severity") == 1]
-    warnings = [d for d in diagnostics if d.get("severity") == 2]
+        errors = [d for d in diagnostics if d.get("severity") == 1]
+        warnings = [d for d in diagnostics if d.get("severity") == 2]
 
-    # Determine pass/fail
-    if threshold <= 1 and errors:
-        passed = False
-        reason = f"{len(errors)} error(s) found"
-    elif threshold <= 2 and warnings:
-        passed = False
-        reason = f"{len(warnings)} warning(s) found"
-    else:
-        passed = True
-        reason = "No issues above threshold"
+        # Determine pass/fail
+        if threshold <= 1 and errors:
+            passed = False
+            reason = f"{len(errors)} error(s) found"
+        elif threshold <= 2 and warnings:
+            passed = False
+            reason = f"{len(warnings)} warning(s) found"
+        else:
+            passed = True
+            reason = "No issues above threshold"
 
-    return json.dumps(
-        {
-            "success": True,
-            "passed": passed,
-            "reason": reason,
-            "filepath": filepath,
-            "threshold": severity_threshold,
-            "summary": {
-                "errors": len(errors),
-                "warnings": len(warnings),
-                "total": len(diagnostics),
-            },
-            "errors": errors[:LSP_MAX_DIAGNOSTICS],
-            "warnings": warnings[:LSP_MAX_WARNINGS],
-            "suggestion": (
-                "Use lsp_auto_fix to get fix suggestions, then apply them and re-verify."
-                if not passed
-                else "Code looks clean."
-            ),
-        }
-    )
+        return json.dumps(
+            {
+                "success": True,
+                "passed": passed,
+                "reason": reason,
+                "filepath": filepath,
+                "threshold": severity_threshold,
+                "summary": {
+                    "errors": len(errors),
+                    "warnings": len(warnings),
+                    "total": len(diagnostics),
+                },
+                "errors": errors[:LSP_MAX_DIAGNOSTICS],
+                "warnings": warnings[:LSP_MAX_WARNINGS],
+                "suggestion": (
+                    "Use lsp_auto_fix to get fix suggestions, then apply them and re-verify."
+                    if not passed
+                    else "Code looks clean."
+                ),
+            }
+        )
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
 
 
 def _cmd_lsp(raw_args: str) -> str:
