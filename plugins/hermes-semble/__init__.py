@@ -96,6 +96,7 @@ class _SembleEngine:
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
+        self._model_lock = threading.Lock()  # separate lock for model loading (faster than RLock)
         self._model_path: Optional[str] = None
         self._model_error: Optional[BaseException] = None
         self._model_loaded = False
@@ -104,7 +105,9 @@ class _SembleEngine:
     def _ensure_model(self) -> str:
         """Load the embedding model once (thread-safe).
 
-        Lock is RLock (reentrant), safe to call from within get_index's with block.
+        Uses its own lock so it's safe to call from outside get_index's lock.
+        load_model() is idempotent (caches internally), but we still guard
+        against redundant calls with a dedicated lock.
         """
         if self._model_loaded:
             if self._model_error:
@@ -112,16 +115,24 @@ class _SembleEngine:
             assert self._model_path is not None
             return self._model_path
 
-        try:
-            # load_model returns (model, model_path) tuple
-            _, self._model_path = load_model()
-            self._model_loaded = True
-            logger.info("Embedding model loaded: %s", self._model_path)
-        except Exception as e:
-            self._model_error = e
-            self._model_loaded = True
-            raise RuntimeError(f"Failed to load embedding model: {e}")
-        return self._model_path
+        with self._model_lock:
+            # Double-check under lock
+            if self._model_loaded:
+                if self._model_error:
+                    raise RuntimeError(f"Embedding model failed to load: {self._model_error}")
+                assert self._model_path is not None
+                return self._model_path
+
+            try:
+                # load_model returns (model, model_path) tuple
+                _, self._model_path = load_model()
+                self._model_loaded = True
+                logger.info("Embedding model loaded: %s", self._model_path)
+            except Exception as e:
+                self._model_error = e
+                self._model_loaded = True
+                raise RuntimeError(f"Failed to load embedding model: {e}")
+            return self._model_path
 
     def _evict_lru(self) -> None:
         """Evict the oldest index if at capacity (caller must hold lock)."""
