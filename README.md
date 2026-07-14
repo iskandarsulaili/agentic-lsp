@@ -6,17 +6,17 @@
 </p>
 
 <p align="center">
-  <b>OpenCode's two key architecture advantages for agentic coding — as Hermes plugins.</b>
+  <b>Ultimate vibe coding plugins for Hermes AI agent.</b>
 </p>
 
 <p align="center">
-  Effect-ts functional core • LSP code intelligence • Zero external deps • Thread-safe
+  Effect-ts functional architecture • LSP code intelligence • Semble semantic code search • Graphify knowledge graph • 23 tools • Zero external deps
 </p>
 
 <p align="center">
   <a href="#-features">Features</a> •
   <a href="#-quick-start">Quick Start</a> •
-  <a href="#-opencode-architecture-replicated">Architecture</a> •
+  <a href="#-the-vibe-coding-stack">The Stack</a> •
   <a href="#-comparison">Comparison</a>
 </p>
 
@@ -30,21 +30,21 @@
 
 ---
 
-**agentic-lsp** brings OpenCode's architecture advantages for agentic coding to Hermes — and adds Semble for whole-repo code search and Graphify for structural understanding:
+**agentic-lsp** is the ultimate vibe coding stack for [Hermes AI agent](https://hermes-agent.nousresearch.com). Four plugins, 23 tools, zero external dependencies. Everything you need to turn Hermes into a self-correcting, codebase-aware AI coding agent:
 
-**1. Effect-ts functional architecture** — OpenCode uses Effect-ts (TypeScript) to make every operation composable, typed, and error-tracked. agentic-lsp replicates this in pure Python: typed errors with `_tag` discriminators, a DI container with cycle detection, structured concurrency via Scope + Fiber, and composable Effect chains. Tool calls that can't fail silently — every error type is tracked and catchable.
+**1. Effect-ts functional architecture** — Typed errors, DI container with cycle detection, structured concurrency via Scope + Fiber. Every operation is composable, typed, and error-tracked. No silent failures.
 
-**2. LSP code intelligence** — OpenCode uses LSP for real-time diagnostics after every edit. agentic-lsp does the same: 7 Hermes tools for diagnostics, completions, hover, go-to-definition, and auto-fix. The agent self-corrects before shipping broken code. Plus agentic-lsp adds cross-repo fallback, idle client eviction, and thread safety that OpenCode doesn't have.
+**2. LSP code intelligence** — Real-time diagnostics after every edit, completions, hover, go-to-definition, auto-fix. The agent self-corrects before shipping broken code. 14 languages. Cross-repo fallback.
 
-**3. Semble code search** — Whole-repo hybrid search (BM25 + semantic). Fast concept lookup that grep can't do. Complements grep+read: Semble for concepts, grep for exact patterns, read for context.
+**3. Semble semantic code search** — Hybrid BM25 + semantic embeddings. Find code by what it *does*, not just by what characters it contains. ~98% fewer tokens than grep+read.
 
-**4. Graphify knowledge graph** — Structural code understanding via dependency graphs. Query relationships, trace call chains, find subsystems, and explain concepts. Complements LSP (per-file depth) and Semble (semantic search) with structural relationships.
+**4. Graphify knowledge graph** — Dependency graphs, call chains, subsystem detection, shortest paths between concepts. Understand how everything connects.
 
-Both plugins are **pure Python, zero external dependencies** (stdlib only). They install in seconds and survive Hermes updates because they live in `~/.hermes/plugins/`, not in Hermes's core. All timeouts, limits, and cache sizes are configurable via `.env` — no hardcoded settings.
+All four plugins are **pure Python, zero external dependencies** (stdlib only). They install in seconds and survive Hermes updates because they live in `~/.hermes/plugins/`, not in Hermes's core. All timeouts, limits, and cache sizes are configurable via `.env` — no hardcoded settings.
 
 ## ✨ Features
 
-### OpenCode's Effect-ts Architecture — in Python
+### Effect-ts Architecture — in Python
 
 | What OpenCode has | What agentic-lsp provides |
 |-------------------|--------------------------|
@@ -55,7 +55,7 @@ Both plugins are **pure Python, zero external dependencies** (stdlib only). They
 | Effect-ts `Logger` | Python `logging` — all configurable via env |
 | TypeScript runtime | Python 3.11+ — no transpilation, no bundling |
 
-All exposed through 4 Hermes tools:
+4 Hermes tools:
 
 | Tool | What it does |
 |------|-------------|
@@ -64,22 +64,53 @@ All exposed through 4 Hermes tools:
 | `effect_service` | Register services with explicit dependencies, resolve them, or inspect the graph. Cycle detection at register time. |
 | `effect_inspect` | Inspect the service graph, tool registry, and known error types. |
 
-### OpenCode's LSP Integration — for Hermes
+### LSP Code Intelligence — 14 Languages
 
-| What OpenCode has | What agentic-lsp provides |
-|-------------------|--------------------------|
-| LSP diagnostics after every edit | `lsp_verify` — opens file, gets diagnostics, returns pass/fail. Agent self-corrects before shipping. |
-| LSP completions | `lsp_completions` — method names, imports, documentation |
-| LSP hover | `lsp_hover` — type signatures, documentation for any symbol |
-| LSP go-to-definition | `lsp_definition` — file + line number, with cross-repo fallback |
-| LSP code actions | `lsp_auto_fix` — quick-fix suggestions (like the IDE lightbulb) |
-| Workspace symbol search | `lsp_servers` — list available servers and running clients |
+| Tool | What it does |
+|------|-------------|
+| `lsp_verify` | Opens file, gets diagnostics, returns pass/fail. Agent self-corrects before shipping. |
+| `lsp_completions` | Method names, imports, documentation |
+| `lsp_hover` | Type signatures, documentation for any symbol |
+| `lsp_definition` | File + line number, with cross-repo fallback |
+| `lsp_auto_fix` | Quick-fix suggestions (like the IDE lightbulb) |
+| `lsp_servers` | List available servers and running clients |
+| `lsp_diagnostics` | Get diagnostics for a specific file |
 
 **Cross-repo resolution** — when `goto_definition` can't find a symbol in the current repo, it automatically queries all other running LSP servers of the same language. Self-adapting: discovers related repos organically as you open files. No config needed.
 
 **14 languages** — C, C++, Python, TypeScript, JavaScript, JSON, YAML, Rust, Go, HTML, CSS, Bash, Dockerfile, SQL.
 
-All exposed through 7 Hermes tools + `/lsp` slash command.
+7 Hermes tools + `/lsp` slash command.
+
+### Semble Semantic Code Search
+
+Search your whole codebase using natural language or symbol names. Complements grep+read:
+
+| Search type | Tool | Example |
+|-------------|------|---------|
+| Concept/semantic | `semble_search` | "how is authentication handled?" |
+| Symbol lookup | `semble_search` | "where is UserService.createUser?" |
+| Find related code | `semble_find_related` | "all implementations of IRepository" |
+| Exact pattern | `grep` (terminal) | "grep -rn 'TODO' src/" |
+| Full context | `read_file` | After Semble finds the right file |
+
+5 Hermes tools + `/semble` slash command.
+
+### Graphify Knowledge Graph
+
+Structural code understanding via dependency graphs. Complements LSP (per-file depth) and Semble (semantic search) with structural relationships.
+
+| Query type | Tool | Example |
+|-------------|------|---------|
+| Concept relationships | `graphify_query` | "how does auth connect to the database?" |
+| Shortest path | `graphify_path` | "UserService → DatabasePool" |
+| Explain a symbol | `graphify_explain` | "what does RateLimiter connect to?" |
+| Most connected nodes | `graphify_god_nodes` | "what are the core abstractions?" |
+| Graph statistics | `graphify_stats` | node/edge/community counts |
+| Find nodes | `graphify_find` | "find LSPClient in the graph" |
+| Subsystem contents | `graphify_community` | "what's in community 0?" |
+
+7 Hermes tools + `/graphify` slash command.
 
 ### What OpenCode Doesn't Have
 
@@ -108,9 +139,11 @@ All exposed through 7 Hermes tools + `/lsp` slash command.
 ```bash
 git clone https://github.com/iskandarsulaili/agentic-lsp.git /tmp/agentic-lsp
 
-# Install both plugins
+# Install all 4 plugins
 cp -r /tmp/agentic-lsp/plugins/hermes-lsp ~/.hermes/plugins/hermes-lsp
 cp -r /tmp/agentic-lsp/plugins/hermes-effect-engine ~/.hermes/plugins/hermes-effect-engine
+cp -r /tmp/agentic-lsp/plugins/hermes-semble ~/.hermes/plugins/hermes-semble
+cp -r /tmp/agentic-lsp/plugins/hermes-graphify ~/.hermes/plugins/hermes-graphify
 
 # Clean up
 rm -rf /tmp/agentic-lsp
@@ -121,7 +154,17 @@ rm -rf /tmp/agentic-lsp
 ### Enable Plugins
 
 ```bash
-hermes config set plugins.enabled '["hermes-lsp","hermes-effect-engine"]'
+hermes config set plugins.enabled '["hermes-lsp","hermes-effect-engine","hermes-semble","hermes-graphify"]'
+```
+
+### Install Optional Dependencies
+
+```bash
+# For Semble semantic code search
+pip install semble
+
+# For Graphify knowledge graph
+pip install graphifyy
 ```
 
 ### Restart & Verify
@@ -130,7 +173,59 @@ hermes config set plugins.enabled '["hermes-lsp","hermes-effect-engine"]'
 # In Hermes:
 /lsp servers
 /effect
+/semble status
+/graphify status
 ```
+
+## 🎯 The Vibe Coding Stack
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Hermes AI Agent Loop                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   ┌─────────────────┐   ┌──────────────┐   ┌──────────────────┐  │
+│   │  hermes-lsp     │   │ hermes-semble│   │hermes-graphify   │  │
+│   │  (per-file      │   │ (semantic    │   │ (structural      │  │
+│   │   depth)        │   │  search)     │   │  understanding)  │  │
+│   │                 │   │              │   │                  │  │
+│   │ lsp_verify      │   │ semble_search│   │ graphify_query   │  │
+│   │ lsp_completions │   │ find_related │   │ graphify_path    │  │
+│   │ lsp_hover       │   │ stats        │   │ graphify_explain │  │
+│   │ lsp_definition  │   │ reindex      │   │ god_nodes        │  │
+│   │ lsp_auto_fix    │   │ status       │   │ stats            │  │
+│   │ lsp_servers     │   │              │   │ find             │  │
+│   │ lsp_diagnostics │   │              │   │ community        │  │
+│   └─────────────────┘   └──────────────┘   └──────────────────┘  │
+│                                                                  │
+│   ┌──────────────────────────────────────────────────────────┐   │
+│   │  hermes-effect-engine (functional core for all tools)    │   │
+│   │  effect_run • effect_scope • effect_service • inspect   │   │
+│   └──────────────────────────────────────────────────────────┘   │
+│                                                                  │
+│   Workflow:                                                      │
+│   1. Semble → find the right file/concept semantically           │
+│   2. Graphify → explain how it connects to everything else      │
+│   3. LSP → verify correctness after every edit                  │
+│   4. Effect engine → compose operations with typed error safety │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### The Self-Correcting Loop
+
+```
+1. Agent edits file.py
+2. Agent calls lsp_verify(filepath="file.py", content="<new content>")
+3. LSP server returns diagnostics (errors, warnings)
+4. If errors found:
+   a. Agent calls lsp_auto_fix(filepath="file.py")
+   b. Agent applies suggested fixes
+   c. Agent re-verifies
+5. Only when passed=true does the agent proceed
+```
+
+This eliminates the most common failure mode of AI coding agents: **silently shipping broken code**.
 
 ## 🗺️ Supported Languages
 
@@ -158,10 +253,20 @@ hermes config set plugins.enabled '["hermes-lsp","hermes-effect-engine"]'
 │   └── __init__.py           # TypedError, ServiceContainer, Scope, Fiber, Effect, Schema, ToolDef
 │                              # Thread-safe, .env-configured, 0 external deps
 │
-└── hermes-lsp/               # LSP code intelligence (14 languages)
+├── hermes-lsp/               # LSP code intelligence (14 languages)
+│   ├── plugin.yaml           # Hermes plugin manifest
+│   └── __init__.py           # LSPManager, LSPClient, JSON-RPC, cross-repo fallback
+│                              # Thread-safe, .env-configured, 0 external deps
+│
+├── hermes-semble/            # Semantic code search
+│   ├── plugin.yaml           # Hermes plugin manifest
+│   └── __init__.py           # _SembleEngine, BM25+semantic hybrid search
+│                              # Thread-safe, .env-configured
+│
+└── hermes-graphify/          # Knowledge graph
     ├── plugin.yaml           # Hermes plugin manifest
-    └── __init__.py           # LSPManager, LSPClient, JSON-RPC, cross-repo fallback
-                               # Thread-safe, .env-configured, 0 external deps
+    └── __init__.py           # _GraphEngine, dependency graph queries
+                              # Thread-safe, .env-configured
 ```
 
 ### Thread Safety Architecture
@@ -223,6 +328,19 @@ HERMES_EFFECT_DEFAULT_TIMEOUT_MS=30000  # Effect run timeout
 HERMES_EFFECT_SHELL_TIMEOUT=30          # Shell command timeout
 HERMES_EFFECT_FIBER_JOIN_TIMEOUT=30     # Fiber join timeout
 HERMES_EFFECT_POOL_SIZE=4               # Thread pool size for Effect.with_timeout
+
+# Semble
+HERMES_SEMBLE_CACHE_SIZE=10             # Max cached indexes (LRU eviction)
+HERMES_SEMBLE_TOP_K=5                   # Default results per search
+HERMES_SEMBLE_SNIPPET_LINES=10          # Default snippet line count
+HERMES_SEMBLE_INDEX_TIMEOUT=120.0       # Max seconds to wait for indexing
+
+# Graphify
+HERMES_GRAPHIFY_GRAPH=""                # Default graph path
+HERMES_GRAPHIFY_CACHE_SIZE=10          # Max cached graphs (LRU eviction)
+HERMES_GRAPHIFY_QUERY_DEPTH=3           # Default traversal depth
+HERMES_GRAPHIFY_TOKEN_BUDGET=2000       # Default output token budget
+HERMES_GRAPHIFY_MAX_FILE_SIZE=104857600 # Max graph file size (100MB)
 ```
 
 ## 🔄 Comparison
@@ -245,107 +363,8 @@ HERMES_EFFECT_POOL_SIZE=4               # Thread pool size for Effect.with_timeo
 | **Agent-agnostic** | ✓ (Hermes, OpenCode, Cline) | ✗ (OpenCode only) | ✗ (Claude Code only) |
 | **Survives updates** | ✓ (user plugin dir) | ✗ (monorepo) | ✗ (bundled) |
 | **Languages** | 14 | ~10 | ~10 |
-
-## 🧪 How It Works
-
-### The Self-Correcting Loop
-
-```
-1. Agent edits file.py
-2. Agent calls lsp_verify(filepath="file.py", content="<new content>")
-3. LSP server returns diagnostics (errors, warnings)
-4. If errors found:
-   a. Agent calls lsp_auto_fix(filepath="file.py")
-   b. Agent applies suggested fixes
-   c. Agent re-verifies
-5. Only when passed=true does the agent proceed
-```
-
-This eliminates the most common failure mode of AI coding agents: **silently shipping broken code**.
-
-### The Effect Chain
-
-```
-1. Agent defines operations as typed steps
-2. effect_run validates each step's input/output against its schema
-3. On typed error, the chain stops with a structured error report
-4. The agent can catch specific error types and handle them
-```
-
-### Semble Code Search
-
-Search your whole codebase using natural language or symbol names. Complements grep+read:
-
-| Search type | Tool | Example |
-|-------------|------|---------|
-| Concept/semantic | `semble_search` | "how is authentication handled?" |
-| Symbol lookup | `semble_search` | "where is UserService.createUser?" |
-| Find related code | `semble_find_related` | "all implementations of IRepository" |
-| Exact pattern | `grep` (terminal) | "grep -rn 'TODO' src/" |
-| Full context | `read_file` | After Semble finds the right file |
-
-**5 Hermes tools** + `/semble` slash command.
-
-### Install Semble
-
-```bash
-pip install semble
-```
-
-### Enable Plugin
-
-```bash
-hermes config set plugins.enabled '["hermes-lsp","hermes-effect-engine","hermes-semble","hermes-graphify"]'
-```
-
-### Graphify Knowledge Graph
-
-Structural code understanding via dependency graphs. Complements LSP (per-file depth) and Semble (semantic search) with structural relationships.
-
-| Query type | Tool | Example |
-|-------------|------|---------|
-| Concept relationships | `graphify_query` | "how does auth connect to the database?" |
-| Shortest path | `graphify_path` | "UserService → DatabasePool" |
-| Explain a symbol | `graphify_explain` | "what does RateLimiter connect to?" |
-| Most connected nodes | `graphify_god_nodes` | "what are the core abstractions?" |
-| Graph statistics | `graphify_stats` | node/edge/community counts |
-| Find nodes | `graphify_find` | "find LSPClient in the graph" |
-| Subsystem contents | `graphify_community` | "what's in community 0?" |
-
-**7 Hermes tools** + `/graphify` slash command.
-
-### Install Graphify
-
-```bash
-pip install graphifyy
-```
-
-Then build a graph for your project:
-
-```bash
-cd /path/to/project
-python3 -c "
-from pathlib import Path
-from graphify.extract import extract, collect_files
-from graphify.build import build_from_json
-from graphify.cluster import cluster
-from networkx.readwrite import json_graph
-import json
-
-files = list(collect_files(Path('.')))
-result = extract(files)
-G = build_from_json(result)
-communities = cluster(G)
-for cid, nodes in communities.items():
-    for nid in nodes:
-        G.nodes[nid]['community'] = cid
-Path('graphify-out').mkdir(exist_ok=True)
-data = json_graph.node_link_data(G, edges='links')
-with open('graphify-out/graph.json', 'w') as f:
-    json.dump(data, f)
-print(f'Graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges, {len(communities)} communities')
-"
-```
+| **Semantic code search** | ✓ (Semble) | ✗ | ✗ |
+| **Knowledge graph** | ✓ (Graphify) | ✗ | ✗ |
 
 ## 📄 License
 
@@ -354,25 +373,5 @@ MIT
 ---
 
 <p align="center">
-  <b>agentic-lsp</b> — OpenCode's two architecture advantages, replicated for Hermes.
+  <b>agentic-lsp</b> — Ultimate vibe coding plugins for Hermes AI agent.
 </p>
-
-## 📊 What This Replicates from OpenCode
-
-| OpenCode Feature | Replicated? | Notes |
-|-----------------|-------------|-------|
-| Effect-ts `Effect<A, E, R>` | ✓ | `Effect[T, E]` — compose, map, flatMap, catch, retry, withTimeout |
-| Effect-ts `Schema.TaggedError` | ✓ | `TypedError` — tagged errors with `_tag`, JSON round-trip |
-| Effect-ts `Layer` (DI container) | ✓ | `ServiceContainer` — register, resolve, cycle detection |
-| Effect-ts `Scope` + `Fiber` | ✓ | `Scope` + `Fiber` — fork, join, interrupt on scope exit |
-| Effect-ts `Context` | ✗ | Python doesn't require context bundles — services resolve directly |
-| LSP diagnostics | ✓ | `lsp_verify` tool — opens file, gets diagnostics, pass/fail |
-| LSP completions | ✓ | `lsp_completions` tool |
-| LSP hover | ✓ | `lsp_hover` tool |
-| LSP go-to-definition | ✓ | `lsp_definition` tool — single-workspace in OpenCode, cross-repo here |
-| LSP code actions | ✓ | `lsp_auto_fix` tool — OpenCode doesn't expose code actions |
-| LSP formatting | ✓ | Via `lsp_auto_fix` — OpenCode doesn't expose formatter |
-| Rich terminal TUI | ✗ | Hermes is a CLI agent not a TUI app |
-| Vercel AI SDK streaming | ✗ | Hermes uses its own provider abstraction, not Vercel SDK |
-| Durable Session V2 | ✗ | Hermes has its own session management |
-| Monorepo build | ✗ | Published as standalone plugins (survives updates) |
