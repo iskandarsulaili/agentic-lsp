@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/iskandarsulaili/agentic-lsp/main/assets/logo-dark.svg">
-    <img src="https://raw.githubusercontent.com/iskandarsulaili/agentic-lsp/main/assets/logo-light.svg" alt="agentic-lsp" width="480">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/iskandarsulaili/hermes-ultimate-coding/main/assets/logo-dark.svg">
+    <img src="https://raw.githubusercontent.com/iskandarsulaili/hermes-ultimate-coding/main/assets/logo-light.svg" alt="hermes-ultimate-coding" width="480">
   </picture>
 </p>
 
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  Effect-ts functional architecture • LSP code intelligence • Semble semantic code search • Graphify knowledge graph • 23 tools • Zero external deps
+  Effect-ts functional architecture • LSP code intelligence • Semble semantic code search • Graphify knowledge graph • 23 tools • Zero deps (stdlib)
 </p>
 
 <p align="center">
@@ -21,16 +21,16 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/iskandarsulaili/agentic-lsp"><img alt="GitHub" src="https://img.shields.io/badge/GitHub-agentic--lsp-2ea44f?style=flat-square&logo=github"></a>
-  <a href="https://github.com/iskandarsulaili/agentic-lsp/blob/main/LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"></a>
+  <a href="https://github.com/iskandarsulaili/hermes-ultimate-coding"><img alt="GitHub" src="https://img.shields.io/badge/GitHub-hermes--ultimate--coding-2ea44f?style=flat-square&logo=github"></a>
+  <a href="https://github.com/iskandarsulaili/hermes-ultimate-coding/blob/main/LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"></a>
   <a href="#"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-blue?style=flat-square&logo=python"></a>
-  <a href="#"><img alt="Zero deps" src="https://img.shields.io/badge/dependencies-zero-success?style=flat-square"></a>
+  <a href="#"><img alt="Zero deps" src="https://img.shields.io/badge/dependencies-stdlib-success?style=flat-square"></a>
   <a href="https://github.com/sponsors/iskandarsulaili"><img alt="Sponsor" src="https://img.shields.io/badge/sponsor-30363D?style=flat-square&logo=GitHub-Sponsors&logoColor=EA4AAA"></a>
 </p>
 
 ---
 
-**agentic-lsp** is the ultimate vibe coding stack for [Hermes AI agent](https://hermes-agent.nousresearch.com). Four plugins, 23 tools, zero external dependencies. Everything you need to turn Hermes into a self-correcting, codebase-aware AI coding agent:
+**hermes-ultimate-coding** is the ultimate vibe coding stack for [Hermes AI agent](https://hermes-agent.nousresearch.com). Four plugins, 23 tools. Everything you need to turn Hermes into a self-correcting, codebase-aware AI coding agent:
 
 **1. Effect-ts functional architecture** — Typed errors, DI container with cycle detection, structured concurrency via Scope + Fiber. Every operation is composable, typed, and error-tracked. No silent failures.
 
@@ -40,20 +40,22 @@
 
 **4. Graphify knowledge graph** — Dependency graphs, call chains, subsystem detection, shortest paths between concepts. Understand how everything connects.
 
-All four plugins are **pure Python, zero external dependencies** (stdlib only). They install in seconds and survive Hermes updates because they live in `~/.hermes/plugins/`, not in Hermes's core. All timeouts, limits, and cache sizes are configurable via `.env` — no hardcoded settings.
+The LSP and Effect Engine plugins are **pure Python, zero external dependencies** (stdlib only). Semble and Graphify require optional pip packages (`pip install semble`, `pip install graphifyy`). All four install in seconds and survive Hermes updates because they live in `~/.hermes/plugins/`, not in Hermes's core. All timeouts, limits, and cache sizes are configurable via environment variables — no hardcoded settings.
 
 ## ✨ Features
 
 ### Effect-ts Architecture — in Python
 
-| What OpenCode has | What agentic-lsp provides |
-|-------------------|--------------------------|
+| What OpenCode has | What hermes-ultimate-coding provides |
+|-------------------|------------------------------|
 | Effect-ts `Effect<A, E, R>` | `Effect[T, E]` — compose, map, flatMap, catch, retry, withTimeout |
 | Effect-ts `Schema.TaggedError` | `TypedError` — tagged errors with `_tag` discriminator, JSON round-trip |
 | Effect-ts `Layer` (DI) | `ServiceContainer` — register services with deps, resolve graphs, detect cycles at register time |
 | Effect-ts `Scope` + `Fiber` | `Scope` + `Fiber` — async `fork`, `join`, `interrupt`, auto-cancel on scope exit |
 | Effect-ts `Logger` | Python `logging` — all configurable via env |
 | TypeScript runtime | Python 3.11+ — no transpilation, no bundling |
+
+**Zero external dependencies** — stdlib only. No pip install needed.
 
 4 Hermes tools:
 
@@ -78,7 +80,7 @@ All four plugins are **pure Python, zero external dependencies** (stdlib only). 
 
 **Cross-repo resolution** — when `goto_definition` can't find a symbol in the current repo, it automatically queries all other running LSP servers of the same language. Self-adapting: discovers related repos organically as you open files. No config needed.
 
-**14 languages** — C, C++, Python, TypeScript, JavaScript, JSON, YAML, Rust, Go, HTML, CSS, Bash, Dockerfile, SQL.
+**Zero external dependencies** — stdlib only. No pip install needed.
 
 7 Hermes tools + `/lsp` slash command.
 
@@ -93,6 +95,8 @@ Search your whole codebase using natural language or symbol names. Complements g
 | Find related code | `semble_find_related` | "all implementations of IRepository" |
 | Exact pattern | `grep` (terminal) | "grep -rn 'TODO' src/" |
 | Full context | `read_file` | After Semble finds the right file |
+
+**Requires:** `pip install semble` (optional — plugin loads without it, tools return helpful error)
 
 5 Hermes tools + `/semble` slash command.
 
@@ -110,18 +114,20 @@ Structural code understanding via dependency graphs. Complements LSP (per-file d
 | Find nodes | `graphify_find` | "find LSPClient in the graph" |
 | Subsystem contents | `graphify_community` | "what's in community 0?" |
 
+**Requires:** `pip install graphifyy` (optional — plugin loads without it, tools return helpful error)
+
 7 Hermes tools + `/graphify` slash command.
 
 ### What OpenCode Doesn't Have
 
-| Feature | agentic-lsp | OpenCode |
-|---------|-------------|----------|
+| Feature | hermes-ultimate-coding | OpenCode |
+|---------|------------------------|----------|
 | **Idle client eviction** | ✓ — clients auto-evicted after TTL | ✗ — clients live forever |
 | **Server availability cache** | ✓ — caches binary checks for 60s | ✗ — checks every time |
 | **Project root cache** | ✓ — caches root discovery | ✗ — re-discovers every file |
 | **Thread safety** | ✓ — every shared state has a lock | ✗ — single-threaded only |
 | **Timeouts on every I/O** | ✓ — reads, writes, stops all have configurable timeouts | Partial |
-| **.env configuration** | ✓ — 25+ env vars for all timeouts/limits | ✗ — hardcoded |
+| **Environment variable configuration** | ✓ — 30+ env vars for all timeouts/limits | ✗ — hardcoded |
 | **Cross-repo LSP fallback** | ✓ — queries other repos on miss | ✗ — single workspace only |
 | **Survives agent updates** | ✓ — lives in user plugin dir | ✗ — bundled in monorepo |
 | **Agent-agnostic** | ✓ — works with Hermes, OpenCode, Cline, any plugin system | ✗ — OpenCode only |
@@ -131,25 +137,24 @@ Structural code understanding via dependency graphs. Complements LSP (per-file d
 ### Prerequisites
 
 - **Hermes Agent** — plugins auto-discover from `~/.hermes/plugins/`
-- **Python 3.11+** — no other dependencies
-- **Language servers** — install the ones you need (see [Supported Languages](#-supported-languages))
+- **Python 3.11+** — LSP and EE plugins need only stdlib; Semble and Graphify need optional pip packages
 
 ### Install
 
 ```bash
-git clone https://github.com/iskandarsulaili/agentic-lsp.git /tmp/agentic-lsp
+git clone https://github.com/iskandarsulaili/hermes-ultimate-coding.git /tmp/hermes-ultimate-coding
 
 # Install all 4 plugins
-cp -r /tmp/agentic-lsp/plugins/hermes-lsp ~/.hermes/plugins/hermes-lsp
-cp -r /tmp/agentic-lsp/plugins/hermes-effect-engine ~/.hermes/plugins/hermes-effect-engine
-cp -r /tmp/agentic-lsp/plugins/hermes-semble ~/.hermes/plugins/hermes-semble
-cp -r /tmp/agentic-lsp/plugins/hermes-graphify ~/.hermes/plugins/hermes-graphify
+cp -r /tmp/hermes-ultimate-coding/plugins/hermes-lsp ~/.hermes/plugins/hermes-lsp
+cp -r /tmp/hermes-ultimate-coding/plugins/hermes-effect-engine ~/.hermes/plugins/hermes-effect-engine
+cp -r /tmp/hermes-ultimate-coding/plugins/hermes-semble ~/.hermes/plugins/hermes-semble
+cp -r /tmp/hermes-ultimate-coding/plugins/hermes-graphify ~/.hermes/plugins/hermes-graphify
 
 # Clean up
-rm -rf /tmp/agentic-lsp
+rm -rf /tmp/hermes-ultimate-coding
 ```
 
-> **Important:** Each plugin must be a direct subdirectory of `~/.hermes/plugins/`. Cloning the whole repo into `~/.hermes/plugins/agentic-lsp/` will NOT work.
+> **Important:** Each plugin must be a direct subdirectory of `~/.hermes/plugins/`. Cloning the whole repo into `~/.hermes/plugins/hermes-ultimate-coding/` will NOT work.
 
 ### Enable Plugins
 
@@ -232,10 +237,12 @@ This eliminates the most common failure mode of AI coding agents: **silently shi
 | Language | Server | Install |
 |----------|--------|---------|
 | Python | Pyright / basedpyright | `pip install pyright` |
-| TypeScript / JavaScript | typescript-language-server | `npm i -g typescript-language-server` |
+| TypeScript | typescript-language-server | `npm i -g typescript-language-server` |
+| JavaScript | typescript-language-server | `npm i -g typescript-language-server` |
 | Rust | rust-analyzer | `rustup component add rust-analyzer` |
 | Go | gopls | `go install golang.org/x/tools/gopls@latest` |
-| C / C++ | clangd | `apt install clangd` / `brew install llvm` |
+| C | clangd | `apt install clangd` / `brew install llvm` |
+| C++ | clangd | `apt install clangd` / `brew install llvm` |
 | JSON | vscode-json-languageserver | `npm i -g vscode-json-languageserver` |
 | YAML | yaml-language-server | `npm i -g yaml-language-server` |
 | HTML | vscode-html-languageserver | `npm i -g vscode-html-languageserver` |
@@ -248,22 +255,22 @@ This eliminates the most common failure mode of AI coding agents: **silently shi
 
 ```
 ~/.hermes/plugins/
-├── hermes-effect-engine/     # Effect-ts-style functional core
+├── hermes-effect-engine/     # Effect-ts-style functional core (stdlib only)
 │   ├── plugin.yaml           # Hermes plugin manifest
 │   └── __init__.py           # TypedError, ServiceContainer, Scope, Fiber, Effect, Schema, ToolDef
-│                              # Thread-safe, .env-configured, 0 external deps
+│                              # Thread-safe, .env-configured
 │
-├── hermes-lsp/               # LSP code intelligence (14 languages)
+├── hermes-lsp/               # LSP code intelligence — 14 languages (stdlib only)
 │   ├── plugin.yaml           # Hermes plugin manifest
 │   └── __init__.py           # LSPManager, LSPClient, JSON-RPC, cross-repo fallback
-│                              # Thread-safe, .env-configured, 0 external deps
+│                              # Thread-safe, .env-configured
 │
-├── hermes-semble/            # Semantic code search
+├── hermes-semble/            # Semantic code search (requires: pip install semble)
 │   ├── plugin.yaml           # Hermes plugin manifest
 │   └── __init__.py           # _SembleEngine, BM25+semantic hybrid search
 │                              # Thread-safe, .env-configured
 │
-└── hermes-graphify/          # Knowledge graph
+└── hermes-graphify/          # Knowledge graph (requires: pip install graphifyy)
     ├── plugin.yaml           # Hermes plugin manifest
     └── __init__.py           # _GraphEngine, dependency graph queries
                               # Thread-safe, .env-configured
@@ -292,52 +299,57 @@ Manager (singleton)
 
 All shared state is protected by dedicated locks. No lock ordering deadlocks — the manager never holds a client lock while acquiring another, and vice versa.
 
-### .env Configuration
+### Environment Variable Configuration
 
-Every timeout, limit, and interval is configurable via environment variables with sensible defaults:
+Every timeout, limit, and interval is configurable via environment variables with sensible defaults. **30+ environment variables** across all four plugins:
 
 ```bash
-# LSP timeouts
+# ── LSP timeouts ──────────────────────────────────────────
 HERMES_LSP_REQUEST_TIMEOUT=15           # Per-request timeout (seconds)
 HERMES_LSP_HEADER_TIMEOUT=5             # Header read timeout
 HERMES_LSP_CONTENT_TIMEOUT=30           # Content read timeout
 HERMES_LSP_DIAGNOSTICS_TIMEOUT=5        # Max wait for diagnostics after edit
 HERMES_LSP_STOP_TIMEOUT=5               # Max wait for server process to stop
+HERMES_LSP_CHECK_TIMEOUT=10             # Server binary check timeout
 
-# LSP limits
+# ── LSP limits ────────────────────────────────────────────
 HERMES_LSP_MAX_DIAGNOSTICS=20           # Max errors returned
 HERMES_LSP_MAX_WARNINGS=20              # Max warnings returned
+HERMES_LSP_MAX_INFO=10                  # Max info diagnostics returned
 HERMES_LSP_MAX_COMPLETIONS=30           # Max completions returned
 HERMES_LSP_MAX_CONTENT_LENGTH=10485760  # Max message body (10MB)
 
-# LSP lifecycle
+# ── LSP lifecycle ─────────────────────────────────────────
 HERMES_LSP_CLIENT_TTL=300               # Idle client eviction (seconds)
 HERMES_LSP_EVICTION_INTERVAL=60         # Eviction sweep interval
+HERMES_LSP_POLL_INTERVAL=0.01           # Reader thread poll interval
+HERMES_LSP_READ_CHUNK_SIZE=4096         # Stdout read chunk size
+HERMES_LSP_READ_POLL_INTERVAL=0.01      # Read poll interval
 
-# Cache TTLs
+# ── Cache TTLs ────────────────────────────────────────────
 HERMES_LSP_SERVER_CACHE_TTL=60          # Server availability cache
-HERMES_LSP_CROSS_REPO_CACHE_TTL=30     # Cross-repo lookup cache
+HERMES_LSP_CROSS_REPO_CACHE_TTL=30      # Cross-repo lookup cache
 HERMES_LSP_KNOWN_ROOTS_MAX=50           # Max tracked project roots
 HERMES_LSP_CROSS_REPO_CACHE_MAX=100     # Max cross-repo cache entries
 
-# Effect engine
+# ── Effect engine ─────────────────────────────────────────
 HERMES_EFFECT_RETRY_MAX_ATTEMPTS=3      # Effect retry attempts
 HERMES_EFFECT_RETRY_DELAY_MS=1000       # Delay between retries
 HERMES_EFFECT_RETRY_MAX_DELAY_MS=30000  # Max exponential backoff
 HERMES_EFFECT_DEFAULT_TIMEOUT_MS=30000  # Effect run timeout
 HERMES_EFFECT_SHELL_TIMEOUT=30          # Shell command timeout
 HERMES_EFFECT_FIBER_JOIN_TIMEOUT=30     # Fiber join timeout
-HERMES_EFFECT_POOL_SIZE=4               # Thread pool size for Effect.with_timeout
+HERMES_EFFECT_POOL_SIZE=4               # Thread pool size
 
-# Semble
+# ── Semble ────────────────────────────────────────────────
 HERMES_SEMBLE_CACHE_SIZE=10             # Max cached indexes (LRU eviction)
 HERMES_SEMBLE_TOP_K=5                   # Default results per search
 HERMES_SEMBLE_SNIPPET_LINES=10          # Default snippet line count
 HERMES_SEMBLE_INDEX_TIMEOUT=120.0       # Max seconds to wait for indexing
 
-# Graphify
+# ── Graphify ──────────────────────────────────────────────
 HERMES_GRAPHIFY_GRAPH=""                # Default graph path
-HERMES_GRAPHIFY_CACHE_SIZE=10          # Max cached graphs (LRU eviction)
+HERMES_GRAPHIFY_CACHE_SIZE=10           # Max cached graphs (LRU eviction)
 HERMES_GRAPHIFY_QUERY_DEPTH=3           # Default traversal depth
 HERMES_GRAPHIFY_TOKEN_BUDGET=2000       # Default output token budget
 HERMES_GRAPHIFY_MAX_FILE_SIZE=104857600 # Max graph file size (100MB)
@@ -345,8 +357,8 @@ HERMES_GRAPHIFY_MAX_FILE_SIZE=104857600 # Max graph file size (100MB)
 
 ## 🔄 Comparison
 
-| Feature | agentic-lsp | OpenCode | Claude Code |
-|---------|-------------|----------|-------------|
+| Feature | hermes-ultimate-coding | OpenCode | Claude Code |
+|---------|------------------------|----------|-------------|
 | **Effect-ts typed errors** | ✓ (Python) | ✓ (TypeScript) | ✗ |
 | **Effect-ts DI container** | ✓ | ✓ (Layer) | ✗ |
 | **Effect-ts Scope + Fiber** | ✓ | ✓ | ✗ |
@@ -358,8 +370,8 @@ HERMES_GRAPHIFY_MAX_FILE_SIZE=104857600 # Max graph file size (100MB)
 | **Idle client eviction** | ✓ | ✗ | ✗ |
 | **Thread safety** | ✓ (dedicated locks) | ✗ (single-threaded) | N/A |
 | **Timeouts on all I/O** | ✓ (configurable) | Partial | ✓ |
-| **.env configuration** | ✓ (25+ vars) | ✗ (hardcoded) | ✗ |
-| **Zero external deps** | ✓ (stdlib only) | ✗ (Effect-ts, AI SDK) | ✗ (bundled) |
+| **Environment variable config** | ✓ (30+ vars) | ✗ (hardcoded) | ✗ |
+| **Zero external deps (LSP + EE)** | ✓ (stdlib only) | ✗ (Effect-ts, AI SDK) | ✗ (bundled) |
 | **Agent-agnostic** | ✓ (Hermes, OpenCode, Cline) | ✗ (OpenCode only) | ✗ (Claude Code only) |
 | **Survives updates** | ✓ (user plugin dir) | ✗ (monorepo) | ✗ (bundled) |
 | **Languages** | 14 | ~10 | ~10 |
@@ -373,5 +385,5 @@ MIT
 ---
 
 <p align="center">
-  <b>agentic-lsp</b> — Ultimate vibe coding plugins for Hermes AI agent.
+  <b>hermes-ultimate-coding</b> — Ultimate vibe coding plugins for Hermes AI agent.
 </p>
