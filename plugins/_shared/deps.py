@@ -9,24 +9,40 @@ other package manager.  Each plugin declares its dependencies as
 or upgraded automatically.  If installation fails, the plugin loads with
 degraded functionality instead of crashing Hermes.
 
-Usage in a plugin::
+|Usage in a plugin::
 
     from _shared.deps import DepSpec, ensure_deps
 
-    _DEPS = [
+    _MY_DEPS = [
         DepSpec("semble", ["python3", "-c", "import semble"],
                 install=[sys.executable, "-m", "pip", "install", "semble"],
                 purpose="semantic code search"),
     ]
 
-    def register(ctx):
-        ensure_deps("my-plugin", _DEPS)
-        ...
+    # Call at module level, BEFORE the try/except ImportError block
+    ensure_deps("my-plugin", _MY_DEPS, ask=True)
+
+    try:
+        import semble
+        AVAILABLE = True
+    except ImportError:
+        AVAILABLE = False
+
+**Important:** ``ensure_deps()`` must run at **module level** (not inside
+``register()``) for plugins that have a module-level ``try/except ImportError``
+block.  The import attempt runs at import time — if ``ensure_deps()`` runs
+inside ``register()``, the dep is installed too late and the import fails
+permanently for the session.
+
+For plugins with no module-level imports (pure stdlib), ``ensure_deps()``
+can be called inside ``register()``, but it's unnecessary — stdlib modules
+are always available.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import sys
 import threading
@@ -57,6 +73,36 @@ class DepSpec:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
+def _kill_process_group(proc: subprocess.Popen) -> None:
+    """Kill the entire process group of *proc*.
+
+    When ``shell=True``, ``proc.kill()`` only kills the shell — not the
+    child processes it spawned (pip, apt, curl|sh, etc.).  Using
+    ``os.killpg`` ensures the whole tree is cleaned up.
+
+    For non-shell commands (no ``preexec_fn=os.setsid``), the process
+    shares the parent's process group — killing that group would kill
+    the Hermes process itself.  In that case, fall back to ``proc.kill()``.
+    """
+    try:
+        pgid = os.getpgid(proc.pid)
+    except (ProcessLookupError, OSError):
+        proc.wait()
+        return
+
+    # If the process is in our own process group, it's a non-shell
+    # command — kill just the process, not the whole group.
+    if pgid == os.getpgid(0):
+        proc.kill()
+    else:
+        try:
+            os.killpg(pgid, 9)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    proc.wait()
+
+
 _verified_plugins: set[str] = set()  # tracks which plugins have run deps check
 _verified_lock = threading.Lock()   # guard for _verified_plugins (thread-safe)
 
@@ -71,12 +117,14 @@ def _run_cmd(
     * ``list[str]`` → direct ``subprocess.run`` (no shell)
     * ``str``       → ``shell=True`` (required for pipes, redirects)
 
-    Kills the child process on timeout to prevent orphan processes.
+    Kills the **entire process group** on timeout to prevent orphan
+    processes (critical when ``shell=True`` spawns children).
     Always uses ``text=True`` so stdout/stderr are ``str``, not ``bytes``.
     """
     kwargs: dict = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "text": True}
     if isinstance(args, str):
         kwargs["shell"] = True
+        kwargs["preexec_fn"] = os.setsid  # new process group for killpg
         proc = subprocess.Popen(args, **kwargs)
     else:
         proc = subprocess.Popen(args, **kwargs)
@@ -84,8 +132,7 @@ def _run_cmd(
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
+        _kill_process_group(proc)
         raise
 
     return subprocess.CompletedProcess(
@@ -108,6 +155,7 @@ def _stream_cmd(args: list[str] | str, label: str = "  deps", timeout: int = 300
     kwargs: dict = {"stdout": subprocess.PIPE, "stderr": subprocess.STDOUT, "text": True}
     if isinstance(args, str):
         kwargs["shell"] = True
+        kwargs["preexec_fn"] = os.setsid  # new process group for killpg
         proc = subprocess.Popen(args, **kwargs)
     else:
         proc = subprocess.Popen(args, **kwargs)
@@ -140,7 +188,7 @@ def _stream_cmd(args: list[str] | str, label: str = "  deps", timeout: int = 300
             try:
                 item = q.get(timeout=timeout)
             except queue.Empty:
-                proc.kill()
+                _kill_process_group(proc)
                 raise RuntimeError(f"command timed out after {timeout}s")
             if item is sentinel:
                 break

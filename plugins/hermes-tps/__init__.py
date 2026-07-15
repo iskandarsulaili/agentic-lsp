@@ -24,35 +24,9 @@ _shared_dir = str(Path(__file__).resolve().parent.parent)
 if _shared_dir not in sys.path:
     sys.path.insert(0, _shared_dir)
 
-from _shared.deps import DepSpec, ensure_deps
-
 logger = logging.getLogger("hermes-tps")
 
-# ---------------------------------------------------------------------------
-# JIT dependency management
-# ---------------------------------------------------------------------------
-_TPS_DEPS = [
-    DepSpec(
-        "functools",
-        ["python3", "-c", "import functools"],
-        purpose="function wrapping for CLI monkey-patches",
-    ),
-    DepSpec(
-        "threading",
-        ["python3", "-c", "import threading"],
-        purpose="thread-safe shared state",
-    ),
-    DepSpec(
-        "time",
-        ["python3", "-c", "import time"],
-        purpose="monotonic clock for expiry",
-    ),
-    DepSpec(
-        "collections",
-        ["python3", "-c", "from collections import deque"],
-        purpose="ring buffer for sliding-window average",
-    ),
-]
+# No external dependencies — stdlib only.  No ensure_deps() needed.
 
 # =============================================================================
 # Thread-safe t/s storage with sliding-window smoothing
@@ -388,7 +362,6 @@ def _patch_cli_status_bar() -> None:
 
 def register(ctx) -> Dict[str, Any]:
     """Register the hermes-tps plugin."""
-    ensure_deps("hermes-tps", _TPS_DEPS)
     global _hook_registered
     if not _hook_registered:
         ctx.register_hook("post_api_request", _on_post_api_request)
