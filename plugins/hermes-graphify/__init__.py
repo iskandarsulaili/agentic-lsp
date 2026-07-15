@@ -52,6 +52,11 @@ _GRAPHIFY_DEPS = [
     ),
 ]
 
+# Install dep BEFORE the module-level import attempt — otherwise the
+# try/except ImportError below runs first and _GRAPHIFY_AVAILABLE stays
+# False for the entire session.
+ensure_deps("hermes-graphify", _GRAPHIFY_DEPS, ask=True)
+
 # =============================================================================
 # Lazy import of graphify dependencies
 # =============================================================================
@@ -1013,7 +1018,6 @@ def _cmd_graphify(raw_args: str) -> str:
 
 def register(ctx: Any) -> Dict[str, Any]:
     """Register the Hermes plugin — tools and slash commands."""
-    ensure_deps("hermes-graphify", _GRAPHIFY_DEPS)
     logger.info("Registering hermes-graphify plugin")
 
     if not _engine.available():

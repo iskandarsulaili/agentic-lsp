@@ -64,17 +64,36 @@ _verified_lock = threading.Lock()   # guard for _verified_plugins (thread-safe)
 def _run_cmd(
     args: list[str] | str,
     *,
-    capture: bool = False,
     timeout: int = 120,
 ) -> subprocess.CompletedProcess:
-    """Run a shell command.
+    """Run a shell command and capture its output.
 
     * ``list[str]`` → direct ``subprocess.run`` (no shell)
     * ``str``       → ``shell=True`` (required for pipes, redirects)
+
+    Kills the child process on timeout to prevent orphan processes.
+    Always uses ``text=True`` so stdout/stderr are ``str``, not ``bytes``.
     """
+    kwargs: dict = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "text": True}
     if isinstance(args, str):
-        return subprocess.run(args, shell=True, capture_output=capture, timeout=timeout)
-    return subprocess.run(args, capture_output=capture, timeout=timeout)
+        kwargs["shell"] = True
+        proc = subprocess.Popen(args, **kwargs)
+    else:
+        proc = subprocess.Popen(args, **kwargs)
+
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        raise
+
+    return subprocess.CompletedProcess(
+        args=proc.args,
+        returncode=proc.returncode,
+        stdout=stdout or "",
+        stderr=stderr or "",
+    )
 
 
 def _stream_cmd(args: list[str] | str, label: str = "  deps", timeout: int = 300) -> None:
@@ -93,15 +112,24 @@ def _stream_cmd(args: list[str] | str, label: str = "  deps", timeout: int = 300
     else:
         proc = subprocess.Popen(args, **kwargs)
 
-    # Read output line-by-line in real time
+    if proc.stdout is None:
+        # PIPE was requested but Popen couldn't open it (OOM, etc.)
+        proc.wait()
+        if proc.returncode != 0:
+            raise RuntimeError(f"command exited {proc.returncode} (no output pipe)")
+        return
+
+    # Read output line-by-line in real time via a daemon reader thread
     import queue, threading as _thr
     q: queue.Queue = queue.Queue()
+    sentinel = object()
+
     def _reader(stream):
         try:
             for line in iter(stream.readline, ""):
                 q.put(line)
         finally:
-            q.put(None)  # sentinel
+            q.put(sentinel)
             stream.close()
 
     reader = _thr.Thread(target=_reader, args=(proc.stdout,), daemon=True)
@@ -110,14 +138,14 @@ def _stream_cmd(args: list[str] | str, label: str = "  deps", timeout: int = 300
     try:
         while True:
             try:
-                line = q.get(timeout=timeout)
+                item = q.get(timeout=timeout)
             except queue.Empty:
                 proc.kill()
                 raise RuntimeError(f"command timed out after {timeout}s")
-            if line is None:
+            if item is sentinel:
                 break
-            if line.strip():
-                print(f"{label}   {line.rstrip()}", file=sys.stderr, flush=True)
+            if item.strip():
+                print(f"{label}   {item.rstrip()}", file=sys.stderr, flush=True)
     finally:
         reader.join(timeout=5)
         proc.wait()
@@ -207,7 +235,7 @@ def ensure_deps(plugin_name: str, specs: list[DepSpec], *, ask: bool = True) -> 
 
     for spec in specs:
         try:
-            result = _run_cmd(spec.check, capture=True, timeout=30)
+            result = _run_cmd(spec.check, timeout=30)
 
             if result.returncode != 0:
                 raise FileNotFoundError(f"exit {result.returncode}")
@@ -219,7 +247,7 @@ def ensure_deps(plugin_name: str, specs: list[DepSpec], *, ask: bool = True) -> 
 
             # Optional version check — ask before upgrading
             if spec.version and spec.version_check:
-                vr = _run_cmd(spec.version_check, capture=True, timeout=15)
+                vr = _run_cmd(spec.version_check, timeout=15)
                 if vr.returncode == 0:
                     installed_raw = vr.stdout.strip()
                     ok, msg = _check_version_meets(installed_raw, spec.version)
@@ -252,7 +280,7 @@ def ensure_deps(plugin_name: str, specs: list[DepSpec], *, ask: bool = True) -> 
                                 pass  # non-interactive → proceed
                         _stream_cmd(spec.install, label=label)
                         # Re-check after upgrade
-                        post_up = _run_cmd(spec.check, capture=True, timeout=15)
+                        post_up = _run_cmd(spec.check, timeout=15)
                         if post_up.returncode == 0:
                             print(
                                 f"{label} ✓ {spec.name} upgraded",
@@ -300,7 +328,7 @@ def ensure_deps(plugin_name: str, specs: list[DepSpec], *, ask: bool = True) -> 
             try:
                 _stream_cmd(spec.install, label=label)
                 # Re-check after install to verify it actually worked
-                post_check = _run_cmd(spec.check, capture=True, timeout=15)
+                post_check = _run_cmd(spec.check, timeout=15)
                 if post_check.returncode == 0:
                     print(
                         f"{label} ✓ {spec.name} installed",

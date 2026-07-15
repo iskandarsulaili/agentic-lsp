@@ -54,6 +54,11 @@ _SEMBLE_DEPS = [
     ),
 ]
 
+# Install dep BEFORE the module-level import attempt — otherwise the
+# try/except ImportError below runs first and _SEMBLE_AVAILABLE stays
+# False for the entire session.
+ensure_deps("hermes-semble", _SEMBLE_DEPS, ask=True)
+
 # =============================================================================
 # Lazy singleton Semble engine — wraps Semble's async cache for synchronous use
 # =============================================================================
@@ -562,7 +567,6 @@ def _cmd_semble(raw_args: str) -> str:
 
 def register(ctx: Any) -> Dict[str, Any]:
     """Register the Hermes plugin — tools and slash commands."""
-    ensure_deps("hermes-semble", _SEMBLE_DEPS)
     logger.info("Registering hermes-semble plugin")
 
     if not _engine.available():
