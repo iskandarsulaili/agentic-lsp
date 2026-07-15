@@ -80,38 +80,47 @@ def _run_cmd(
 def _stream_cmd(args: list[str] | str, label: str = "  deps", timeout: int = 300) -> None:
     """Run a command and stream its output to stderr in real time.
 
-    For both ``list[str]`` and ``str`` commands, output is captured and
-    printed line-by-line to stderr so the user sees progress during
-    installs (pip download bars, apt progress, etc.).
+    Reads output line-by-line as the process runs (not buffered until
+    completion), so the user sees pip download bars, apt progress, etc.
+    as they happen.
 
     Raises ``RuntimeError`` on non-zero exit or timeout.
     """
+    kwargs: dict = {"stdout": subprocess.PIPE, "stderr": subprocess.STDOUT, "text": True}
     if isinstance(args, str):
-        # String commands (pipes, redirects) — use Popen with shell=True
-        proc = subprocess.Popen(
-            args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            shell=True,
-            text=True,
-        )
+        kwargs["shell"] = True
+        proc = subprocess.Popen(args, **kwargs)
     else:
-        proc = subprocess.Popen(
-            args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
+        proc = subprocess.Popen(args, **kwargs)
+
+    # Read output line-by-line in real time
+    import queue, threading as _thr
+    q: queue.Queue = queue.Queue()
+    def _reader(stream):
+        try:
+            for line in iter(stream.readline, ""):
+                q.put(line)
+        finally:
+            q.put(None)  # sentinel
+            stream.close()
+
+    reader = _thr.Thread(target=_reader, args=(proc.stdout,), daemon=True)
+    reader.start()
+
     try:
-        stdout, _ = proc.communicate(timeout=timeout)
-        if stdout:
-            for line in stdout.splitlines():
-                if line.strip():
-                    print(f"{label}   {line.rstrip()}", file=sys.stderr, flush=True)
-    except subprocess.TimeoutExpired:
-        proc.kill()
+        while True:
+            try:
+                line = q.get(timeout=timeout)
+            except queue.Empty:
+                proc.kill()
+                raise RuntimeError(f"command timed out after {timeout}s")
+            if line is None:
+                break
+            if line.strip():
+                print(f"{label}   {line.rstrip()}", file=sys.stderr, flush=True)
+    finally:
+        reader.join(timeout=5)
         proc.wait()
-        raise RuntimeError(f"command {' '.join(args) if isinstance(args, list) else args} timed out after {timeout}s")
 
     if proc.returncode != 0:
         raise RuntimeError(f"command {' '.join(args) if isinstance(args, list) else args} exited {proc.returncode}")
@@ -164,21 +173,24 @@ def _check_version_meets(installed_raw: str, requirement: str) -> tuple[bool, st
 # ---------------------------------------------------------------------------
 
 
-def ensure_deps(plugin_name: str, specs: list[DepSpec]) -> None:
+def ensure_deps(plugin_name: str, specs: list[DepSpec], *, ask: bool = True) -> None:
     """JIT dependency verification — runs once per plugin per process.
 
     For each ``DepSpec``:
 
     1. Run the ``check`` command.  Exit 0 → available.
-    2. If missing and ``install`` is set → run the installer with visible
-       progress.  If ``install`` is ``None``, the dep is optional — skip
-       silently.
+    2. If missing and ``install`` is set → ask user permission, then run
+       the installer with visible progress.  If ``install`` is ``None``,
+       the dep is optional — skip silently.
     3. If ``version`` is set, run ``version_check`` and compare.
-       If installed version is too old, **auto-upgrade** — no manual
-       steps needed.
+       If installed version is too old, **ask user permission** before
+       auto-upgrading.
 
     All output goes to *stderr* so it is visible in the terminal even
     when stdout is captured (piped, subagent, etc.).
+
+    When ``ask=True`` (default), the user is prompted on stdin before
+    any install or upgrade.  Set ``ask=False`` for fully automatic mode.
     """
     if plugin_name in _verified_plugins:
         return
@@ -190,6 +202,8 @@ def ensure_deps(plugin_name: str, specs: list[DepSpec]) -> None:
     label = f"  {plugin_name}"
 
     print(f"{label} ⟐ verifying dependencies …", file=sys.stderr, flush=True)
+
+    all_ok = True
 
     for spec in specs:
         try:
@@ -203,7 +217,7 @@ def ensure_deps(plugin_name: str, specs: list[DepSpec]) -> None:
                 file=sys.stderr, flush=True,
             )
 
-            # Optional version check — auto-upgrade if too old
+            # Optional version check — ask before upgrading
             if spec.version and spec.version_check:
                 vr = _run_cmd(spec.version_check, capture=True, timeout=15)
                 if vr.returncode == 0:
@@ -220,6 +234,22 @@ def ensure_deps(plugin_name: str, specs: list[DepSpec]) -> None:
                             f"{label} … {spec.name} {msg} — upgrading …",
                             file=sys.stderr, flush=True,
                         )
+                        if ask:
+                            print(
+                                f"{label}   Upgrade {spec.name}? [Y/n] ",
+                                file=sys.stderr, flush=True,
+                            )
+                            try:
+                                answer = input().strip().lower()
+                                if answer not in ("", "y", "yes"):
+                                    print(
+                                        f"{label} ⚠ {spec.name} upgrade skipped by user",
+                                        file=sys.stderr, flush=True,
+                                    )
+                                    all_ok = False
+                                    continue
+                            except (EOFError, OSError):
+                                pass  # non-interactive → proceed
                         _stream_cmd(spec.install, label=label)
                         # Re-check after upgrade
                         post_up = _run_cmd(spec.check, capture=True, timeout=15)
@@ -230,6 +260,17 @@ def ensure_deps(plugin_name: str, specs: list[DepSpec]) -> None:
                             )
                         else:
                             raise RuntimeError(f"post-upgrade check failed (exit {post_up.returncode})")
+                    else:
+                        # Version too old but no install command — warn
+                        logger.warning(
+                            "%s: %s %s — no upgrade path",
+                            plugin_name, spec.name, msg,
+                        )
+                        print(
+                            f"{label} ⚠ {spec.name} {msg} — no upgrade path",
+                            file=sys.stderr, flush=True,
+                        )
+                        all_ok = False
 
         except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
             if spec.install is None:
@@ -240,6 +281,22 @@ def ensure_deps(plugin_name: str, specs: list[DepSpec]) -> None:
                 f"{label} … {spec.name} not found → installing …",
                 file=sys.stderr, flush=True,
             )
+            if ask:
+                print(
+                    f"{label}   Install {spec.name}? [Y/n] ",
+                    file=sys.stderr, flush=True,
+                )
+                try:
+                    answer = input().strip().lower()
+                    if answer not in ("", "y", "yes"):
+                        print(
+                            f"{label} ⚠ {spec.name} install skipped by user",
+                            file=sys.stderr, flush=True,
+                        )
+                        all_ok = False
+                        continue
+                except (EOFError, OSError):
+                    pass  # non-interactive → proceed
             try:
                 _stream_cmd(spec.install, label=label)
                 # Re-check after install to verify it actually worked
@@ -263,7 +320,9 @@ def ensure_deps(plugin_name: str, specs: list[DepSpec]) -> None:
                     f"{label}   Plugin will run with degraded functionality",
                     file=sys.stderr, flush=True,
                 )
-                # Don't raise — let the plugin load anyway with degraded
-                # functionality rather than crashing Hermes.
+                all_ok = False
 
-    print(f"{label} ✓ deps ok", file=sys.stderr, flush=True)
+    if all_ok:
+        print(f"{label} ✓ deps ok", file=sys.stderr, flush=True)
+    else:
+        print(f"{label} ⚠ deps degraded — some features unavailable", file=sys.stderr, flush=True)
