@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 import threading
 import time
 import traceback
@@ -50,6 +51,8 @@ from typing import (
     get_type_hints,
 )
 
+from _shared.deps import DepSpec, ensure_deps
+
 try:
     from pydantic import BaseModel, Field, ValidationError
     from pydantic import field_validator, model_validator
@@ -60,6 +63,18 @@ except ImportError:
     BaseModel = object  # type: ignore
 
 logger = logging.getLogger("effect-engine")
+
+# ---------------------------------------------------------------------------
+# JIT dependency management
+# ---------------------------------------------------------------------------
+_EFFECT_DEPS = [
+    DepSpec(
+        "pydantic",
+        ["python3", "-c", "import pydantic"],
+        install=[sys.executable, "-m", "pip", "install", "pydantic"],
+        purpose="runtime schema validation (BaseModel, Field)",
+    ),
+]
 
 # =============================================================================
 # Configuration from environment (no hardcoded settings)
@@ -1060,6 +1075,7 @@ def register(ctx: Any) -> None:
 
     Called by the Hermes plugin system during discovery.
     """
+    ensure_deps("hermes-effect-engine", _EFFECT_DEPS)
     logger.info("hermes-effect-engine: registering plugin")
 
     # Register the effect_inspect tool

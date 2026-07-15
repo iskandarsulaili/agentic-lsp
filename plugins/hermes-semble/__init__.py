@@ -27,12 +27,27 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import threading
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from _shared.deps import DepSpec, ensure_deps
+
 logger = logging.getLogger("hermes-semble")
+
+# ---------------------------------------------------------------------------
+# JIT dependency management
+# ---------------------------------------------------------------------------
+_SEMBLE_DEPS = [
+    DepSpec(
+        "semble",
+        ["python3", "-c", "import semble"],
+        install=[sys.executable, "-m", "pip", "install", "semble"],
+        purpose="semantic code search (BM25 + Model2Vec)",
+    ),
+]
 
 # =============================================================================
 # Lazy singleton Semble engine — wraps Semble's async cache for synchronous use
@@ -542,6 +557,7 @@ def _cmd_semble(raw_args: str) -> str:
 
 def register(ctx: Any) -> Dict[str, Any]:
     """Register the Hermes plugin — tools and slash commands."""
+    ensure_deps("hermes-semble", _SEMBLE_DEPS)
     logger.info("Registering hermes-semble plugin")
 
     if not _engine.available():

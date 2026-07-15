@@ -24,13 +24,28 @@ import logging
 import math
 import os
 import re
+import sys
 import threading
 from array import array
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from _shared.deps import DepSpec, ensure_deps
+
 logger = logging.getLogger("hermes-graphify")
+
+# ---------------------------------------------------------------------------
+# JIT dependency management
+# ---------------------------------------------------------------------------
+_GRAPHIFY_DEPS = [
+    DepSpec(
+        "networkx",
+        ["python3", "-c", "import networkx"],
+        install=[sys.executable, "-m", "pip", "install", "graphifyy"],
+        purpose="knowledge graph queries (networkx + graphifyy)",
+    ),
+]
 
 # =============================================================================
 # Lazy import of graphify dependencies
@@ -993,6 +1008,7 @@ def _cmd_graphify(raw_args: str) -> str:
 
 def register(ctx: Any) -> Dict[str, Any]:
     """Register the Hermes plugin — tools and slash commands."""
+    ensure_deps("hermes-graphify", _GRAPHIFY_DEPS)
     logger.info("Registering hermes-graphify plugin")
 
     if not _engine.available():

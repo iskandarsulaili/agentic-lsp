@@ -16,41 +16,16 @@ import sys
 import threading
 import time
 from collections import deque
-from typing import Any, Deque, Dict, List, Optional, Tuple
+from typing import Any, Deque, Dict, Optional, Tuple
+
+from _shared.deps import DepSpec, ensure_deps
 
 logger = logging.getLogger("hermes-tps")
 
-# =============================================================================
-# JIT dependency management (generic — pip, npm, go, apt, rustup, …)
-# =============================================================================
-# Each entry in ``_DEPS_SPEC`` is a ``DepSpec``:
-#
-#   name          — display name (shown in status output)
-#   check         — shell command that exits 0 when available
-#   install       — shell command to install (``None`` = manual hint only)
-#   purpose       - human-readable "why this is needed"
-#   version       — minimum version constraint (e.g. ``">=1.2.3"``, optional)
-#   version_check — shell command that prints the installed version
-#
-# ``check`` / ``install`` / ``version_check`` can be either:
-#   * ``list[str]`` — executed directly via ``subprocess.run`` (safe)
-#   * ``str``       — executed via ``shell=True`` (needed for pipes / redirects)
-import subprocess
-from dataclasses import dataclass, field
-from typing import Literal
-
-
-@dataclass
-class DepSpec:
-    name: str
-    check: list[str] | str
-    install: list[str] | str | None = None
-    purpose: str = ""
-    version: str | None = None
-    version_check: list[str] | str | None = None
-
-
-_DEPS_SPEC: list[DepSpec] = [
+# ---------------------------------------------------------------------------
+# JIT dependency management
+# ---------------------------------------------------------------------------
+_TPS_DEPS = [
     DepSpec(
         "functools",
         ["python3", "-c", "import functools"],
@@ -72,189 +47,6 @@ _DEPS_SPEC: list[DepSpec] = [
         purpose="ring buffer for sliding-window average",
     ),
 ]
-_deps_verified = False
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _run_cmd(
-    args: list[str] | str,
-    *,
-    capture: bool = False,
-    timeout: int = 120,
-) -> subprocess.CompletedProcess:
-    """Run a shell command.
-
-    * ``list[str]`` → direct ``subprocess.run`` (no shell)
-    * ``str``       → ``shell=True`` (required for pipes, redirects)
-    """
-    if isinstance(args, str):
-        return subprocess.run(args, shell=True, capture_output=capture, timeout=timeout)
-    return subprocess.run(args, capture_output=capture, timeout=timeout)
-
-
-def _stream_cmd(args: list[str] | str, label: str = "  hermes-tps") -> None:
-    """Run a command and stream its output to stderr in real time."""
-    kwargs: dict = {}
-    if isinstance(args, str):
-        kwargs["shell"] = True
-        # String commands with pipes don't work well with PIPE, so we
-        # use a PTY-like approach: just let output flow to stderr.
-        print(f"{label}   running: {args}", file=sys.stderr)
-        subprocess.check_call(args, shell=True)
-        return
-
-    proc = subprocess.Popen(
-        args,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-    if proc.stdout:
-        for line in proc.stdout:
-            if line.strip():
-                print(f"{label}   {line.rstrip()}", file=sys.stderr, flush=True)
-    proc.wait()
-    if proc.returncode != 0:
-        raise RuntimeError(f"command {' '.join(args)} exited {proc.returncode}")
-
-
-def _parse_version(ver: str) -> tuple[int, ...]:
-    """Parse ``"1.2.3"`` → ``(1, 2, 3)``.  Ignores leading non-digits."""
-    import re
-    nums = re.findall(r"\d+", ver)
-    return tuple(int(n) for n in nums) if nums else (0,)
-
-
-def _check_version_meets(installed_raw: str, requirement: str) -> tuple[bool, str]:
-    """Check ``installed_raw`` against ``requirement`` (e.g. ``\">=1.2.3\"``).
-
-    Returns ``(ok, message)``.
-    """
-    installed = _parse_version(installed_raw)
-
-    # Strip operator prefix
-    op = "=="
-    req_str = requirement.strip()
-    for possible in (">=", "<=", "!=", ">", "<", "=="):
-        if req_str.startswith(possible):
-            op = possible
-            req_str = req_str[len(possible):].strip()
-            break
-
-    required = _parse_version(req_str)
-
-    if op == ">=":
-        ok = installed >= required
-    elif op == "<=":
-        ok = installed <= required
-    elif op == ">":
-        ok = installed > required
-    elif op == "<":
-        ok = installed < required
-    elif op == "!=":
-        ok = installed != required
-    else:  # ==
-        ok = installed == required
-
-    if ok:
-        return True, f"{'.'.join(map(str, installed))} meets {requirement}"
-    return False, (
-        f"{'.'.join(map(str, installed))} does NOT meet {requirement}"
-    )
-
-
-# ---------------------------------------------------------------------------
-# Public entry point
-# ---------------------------------------------------------------------------
-
-def _ensure_deps() -> None:
-    """JIT dependency verification — runs once per process.
-
-    For each ``DepSpec`` in ``_DEPS_SPEC``:
-
-    1. Run the ``check`` command.  Exit 0 → available.
-    2. If missing and ``install`` is set → run the installer with visible
-       progress.
-    3. If ``version`` is set, run ``version_check`` and compare.
-       **Never auto-upgrades** — the user retains full authority.
-
-    All output goes to *stderr* so it is visible in the terminal even
-    when stdout is captured (piped, subagent, etc.).
-    """
-    global _deps_verified
-    if _deps_verified:
-        return
-    _deps_verified = True
-
-    print("  hermes-tps ⟐ verifying dependencies …", file=sys.stderr, flush=True)
-
-    for spec in _DEPS_SPEC:
-        try:
-            result = _run_cmd(spec.check, capture=True, timeout=30)
-
-            if result.returncode != 0:
-                raise FileNotFoundError(f"exit {result.returncode}")
-
-            print(
-                f"  hermes-tps ✓ {spec.name}  — {spec.purpose or 'ok'}",
-                file=sys.stderr, flush=True,
-            )
-
-            # Optional version check
-            if spec.version and spec.version_check:
-                vr = _run_cmd(spec.version_check, capture=True, timeout=15)
-                if vr.returncode == 0:
-                    installed_raw = vr.stdout.strip()
-                    ok, msg = _check_version_meets(installed_raw, spec.version)
-                    if ok:
-                        logger.info("hermes-tps: %s %s", spec.name, msg)
-                    else:
-                        logger.warning(
-                            "hermes-tps: %s %s", spec.name, msg,
-                        )
-                        print(
-                            f"  hermes-tps ⚠ {spec.name} {msg}",
-                            file=sys.stderr, flush=True,
-                        )
-
-        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
-            # Not available — try to install
-            if spec.install is None:
-                print(
-                    f"  hermes-tps ⚠ {spec.name} not found — {spec.purpose}",
-                    file=sys.stderr, flush=True,
-                )
-                print(
-                    f"            Install manually, or add an install command"
-                    f" to DepSpec",
-                    file=sys.stderr, flush=True,
-                )
-                continue
-
-            print(
-                f"  hermes-tps … {spec.name} not found → installing …",
-                file=sys.stderr, flush=True,
-            )
-            try:
-                _stream_cmd(spec.install)
-                print(
-                    f"  hermes-tps ✓ {spec.name} installed",
-                    file=sys.stderr, flush=True,
-                )
-            except Exception as exc:
-                logger.error(
-                    "hermes-tps: failed to install %s: %s", spec.name, exc,
-                )
-                print(
-                    f"  hermes-tps ✗ failed to install {spec.name}: {exc}",
-                    file=sys.stderr, flush=True,
-                )
-                raise
-
-    print("  hermes-tps ✓ deps ok", file=sys.stderr, flush=True)
 
 # =============================================================================
 # Thread-safe t/s storage with sliding-window smoothing
@@ -590,7 +382,7 @@ def _patch_cli_status_bar() -> None:
 
 def register(ctx) -> Dict[str, Any]:
     """Register the hermes-tps plugin."""
-    _ensure_deps()
+    ensure_deps("hermes-tps", _TPS_DEPS)
     global _hook_registered
     if not _hook_registered:
         ctx.register_hook("post_api_request", _on_post_api_request)
