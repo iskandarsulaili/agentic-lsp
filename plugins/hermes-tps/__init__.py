@@ -241,6 +241,22 @@ def _patch_cli_status_bar() -> None:
             bg_subagent_count = snapshot.get("active_background_subagents", 0)
             if bg_subagent_count:
                 parts.append(f"⛓ {bg_subagent_count}")
+            # Plugin usage indicators (full style)
+            _plugin_counts = snapshot.get("plugin_call_counts", {})
+            if _plugin_counts:
+                _plugin_parts = []
+                for ts, cnt in sorted(_plugin_counts.items()):
+                    if cnt:
+                        _emoji = getattr(self, "_PLUGIN_TOOLSET_EMOJI", {}).get(ts, "?")
+                        _label = getattr(self, "_PLUGIN_TOOLSET_LABEL", {}).get(ts, ts.capitalize())
+                        _plugin_parts.append(f"{_emoji} {_label}:{cnt}")
+                if not _plugin_parts:
+                    _plugin_parts = [
+                        f"{getattr(self, '_PLUGIN_TOOLSET_EMOJI', {}).get(ts, '?')} "
+                        f"{getattr(self, '_PLUGIN_TOOLSET_LABEL', {}).get(ts, ts.capitalize())}:0"
+                        for ts in sorted(_plugin_counts.keys())
+                    ]
+                parts.append(" │ ".join(_plugin_parts))
             parts.append(duration_label)
             prompt_elapsed = snapshot.get("prompt_elapsed")
             if prompt_elapsed:
@@ -324,6 +340,24 @@ def _patch_cli_status_bar() -> None:
             if bg_subagent_count:
                 frags.append(("class:status-bar-dim", " │ "))
                 frags.append(("class:status-bar-strong", f"⛓ {bg_subagent_count}"))
+            # Plugin usage indicators (full width fragments)
+            _plugin_counts = snapshot.get("plugin_call_counts", {})
+            if _plugin_counts:
+                frags.append(("class:status-bar-dim", " │ "))
+                _active_parts = []
+                _inactive_parts = []
+                for ts, cnt in sorted(_plugin_counts.items()):
+                    _emoji = getattr(self, "_PLUGIN_TOOLSET_EMOJI", {}).get(ts, "?")
+                    _label = getattr(self, "_PLUGIN_TOOLSET_LABEL", {}).get(ts, ts.capitalize())
+                    _txt = f"{_emoji} {_label}:{cnt}"
+                    if cnt > 0:
+                        _active_parts.append(("class:status-bar-strong", _txt))
+                    else:
+                        _inactive_parts.append(("class:status-bar-dim", _txt))
+                for i, (style, txt) in enumerate(_active_parts + _inactive_parts):
+                    if i > 0:
+                        frags.append(("class:status-bar-dim", " "))
+                    frags.append((style, txt))
             frags.extend([
                 ("class:status-bar-dim", " │ "),
                 ("class:status-bar-dim", duration_label),
