@@ -591,6 +591,7 @@ def _start_background_build(graph_path: str, project_dir: str) -> None:
 
     def _build_worker():
         import subprocess
+        import time
         logger.info("Background graph build started for %s", project_dir)
         try:
             proc = subprocess.Popen(
