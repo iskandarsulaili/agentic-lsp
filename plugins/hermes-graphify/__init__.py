@@ -591,6 +591,71 @@ def _resolve_graph_path(repo: str) -> str:
     return repo
 
 
+def _check_graph_exists(graph_path: str) -> Optional[str]:
+    """Preemptive check: auto-build graph.json on-demand if missing.
+
+    Returns None if graph.json exists or was successfully built JIT,
+    or an error JSON string if building failed.
+    """
+    import subprocess
+    p = Path(graph_path)
+    if p.exists():
+        return None
+
+    # Resolve project root directory
+    if p.parent.name == "graphify-out":
+        project_dir = str(p.parent.parent)
+    else:
+        project_dir = str(p.parent)
+
+    logger.info("graph.json not found at %s — building JIT (--code-only)", graph_path)
+    try:
+        result = subprocess.run(
+            ["graphify", "extract", project_dir, "--code-only"],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode != 0:
+            return json.dumps({
+                "success": False,
+                "error": (
+                    f"graph.json not found at: {graph_path}\n"
+                    f"Auto-build failed (exit {result.returncode}).\n"
+                    f"stderr: {result.stderr.strip()}\n"
+                    f"Try building manually: cd {project_dir} && graphify extract . && graphify build ."
+                ),
+            })
+        # Verify it was created
+        if p.exists():
+            logger.info("JIT graph build succeeded for %s", project_dir)
+            return None
+        return json.dumps({
+            "success": False,
+            "error": f"Auto-build reported success but graph.json still missing at {graph_path}",
+        })
+    except subprocess.TimeoutExpired:
+        return json.dumps({
+            "success": False,
+            "error": (
+                f"Auto-build timed out after 120s for {project_dir}.\n"
+                f"graph.json not found at: {graph_path}\n"
+                f"Try building manually: cd {project_dir} && graphify extract . && graphify build ."
+            ),
+        })
+    except FileNotFoundError:
+        return json.dumps({
+            "success": False,
+            "error": (
+                f"graph.json not found at: {graph_path} and graphify CLI not found.\n"
+                f"Install: pip install graphifyy"
+            ),
+        })
+    except Exception as e:
+        return json.dumps({
+            "success": False,
+            "error": f"Auto-build failed: {e}",
+        })
+
+
 # =============================================================================
 # Hermes Tool Handlers
 # =============================================================================
@@ -611,6 +676,9 @@ def _handle_graphify_query(args: dict, **kwargs: Any) -> str:
 
     try:
         graph_path = _resolve_graph_path(repo)
+        pre_check = _check_graph_exists(graph_path)
+        if pre_check is not None:
+            return pre_check
         G = _engine.get_graph(graph_path)
         result = _query_graph_text(G, question, depth=depth, token_budget=token_budget)
         return json.dumps({
@@ -638,6 +706,9 @@ def _handle_graphify_path(args: dict, **kwargs: Any) -> str:
 
     try:
         graph_path = _resolve_graph_path(repo)
+        pre_check = _check_graph_exists(graph_path)
+        if pre_check is not None:
+            return pre_check
         G = _engine.get_graph(graph_path)
 
         # Find source and target nodes
@@ -715,6 +786,9 @@ def _handle_graphify_explain(args: dict, **kwargs: Any) -> str:
 
     try:
         graph_path = _resolve_graph_path(repo)
+        pre_check = _check_graph_exists(graph_path)
+        if pre_check is not None:
+            return pre_check
         G = _engine.get_graph(graph_path)
 
         matches = _find_node(G, label)
@@ -770,6 +844,9 @@ def _handle_graphify_god_nodes(args: dict, **kwargs: Any) -> str:
 
     try:
         graph_path = _resolve_graph_path(repo)
+        pre_check = _check_graph_exists(graph_path)
+        if pre_check is not None:
+            return pre_check
         G = _engine.get_graph(graph_path)
 
         # Compute god nodes by degree
@@ -804,6 +881,9 @@ def _handle_graphify_stats(args: dict, **kwargs: Any) -> str:
 
     try:
         graph_path = _resolve_graph_path(repo)
+        pre_check = _check_graph_exists(graph_path)
+        if pre_check is not None:
+            return pre_check
         G = _engine.get_graph(graph_path)
 
         # Count confidence levels
@@ -847,6 +927,9 @@ def _handle_graphify_find(args: dict, **kwargs: Any) -> str:
 
     try:
         graph_path = _resolve_graph_path(repo)
+        pre_check = _check_graph_exists(graph_path)
+        if pre_check is not None:
+            return pre_check
         G = _engine.get_graph(graph_path)
 
         matches = _find_node(G, label)
@@ -885,6 +968,9 @@ def _handle_graphify_community(args: dict, **kwargs: Any) -> str:
 
     try:
         graph_path = _resolve_graph_path(repo)
+        pre_check = _check_graph_exists(graph_path)
+        if pre_check is not None:
+            return pre_check
         G = _engine.get_graph(graph_path)
 
         # Build community map
