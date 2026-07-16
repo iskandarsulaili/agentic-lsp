@@ -805,7 +805,6 @@ def _check_graph_exists(graph_path: str) -> Optional[str]:
     if bg_status == "running":
         # Build already in progress — return status for the LLM to relay
         return json.dumps({
-            "success": True,
             "status": "building",
             "building": True,
             "build_id": graph_path,

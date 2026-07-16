@@ -26,6 +26,23 @@ if _shared_dir not in sys.path:
 
 logger = logging.getLogger("hermes-tps")
 
+
+def _get_plugin_emoji():
+    try:
+        from tools.plugin_usage import PLUGIN_TOOLSET_EMOJI
+        return PLUGIN_TOOLSET_EMOJI
+    except Exception:
+        return {}
+
+
+def _get_plugin_label():
+    try:
+        from tools.plugin_usage import PLUGIN_TOOLSET_LABEL
+        return PLUGIN_TOOLSET_LABEL
+    except Exception:
+        return {}
+
+
 # No external dependencies — stdlib only.  No ensure_deps() needed.
 
 # =============================================================================
@@ -247,8 +264,8 @@ def _patch_cli_status_bar() -> None:
                 _plugin_parts = []
                 for ts, cnt in sorted(_plugin_counts.items()):
                     if cnt:
-                        _emoji = getattr(self, "_PLUGIN_TOOLSET_EMOJI", {}).get(ts, "?")
-                        _label = getattr(self, "_PLUGIN_TOOLSET_LABEL", {}).get(ts, ts.capitalize())
+                        _emoji = _get_plugin_emoji().get(ts, "?")
+                        _label = _get_plugin_label().get(ts, ts.capitalize())
                         _plugin_parts.append(f"{_emoji} {_label}:{cnt}")
                 if not _plugin_parts:
                     _plugin_parts = [
@@ -347,8 +364,8 @@ def _patch_cli_status_bar() -> None:
                 _active_parts = []
                 _inactive_parts = []
                 for ts, cnt in sorted(_plugin_counts.items()):
-                    _emoji = getattr(self, "_PLUGIN_TOOLSET_EMOJI", {}).get(ts, "?")
-                    _label = getattr(self, "_PLUGIN_TOOLSET_LABEL", {}).get(ts, ts.capitalize())
+                    _emoji = _get_plugin_emoji().get(ts, "?")
+                    _label = _get_plugin_label().get(ts, ts.capitalize())
                     _txt = f"{_emoji} {_label}:{cnt}"
                     if cnt > 0:
                         _active_parts.append(("class:status-bar-strong", _txt))
