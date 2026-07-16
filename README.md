@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  Effect-ts functional architecture • LSP code intelligence • Semble semantic code search • Graphify knowledge graph • t/s status bar • 24 tools • Zero deps (stdlib)
+  Effect-ts functional architecture • LSP code intelligence • Semble semantic code search • Graphify knowledge graph • t/s status bar • Plugin usage indicators • 24 tools • Zero deps (stdlib)
 </p>
 
 <p align="center">
@@ -41,6 +41,8 @@
 **4. Graphify knowledge graph** — Dependency graphs, call chains, subsystem detection, shortest paths between concepts. Understand how everything connects.
 
 **5. t/s status bar** — Real-time tokens-per-second in the Hermes TUI status bar. See generation speed alongside model, context %, and elapsed time. Zero deps (stdlib only).
+
+**6. Plugin usage indicators** — TUI status bar shows live 🔧⚡🕸️🔍 indicators for plugin tool usage, adaptively from emoji-only to full names+counts depending on terminal width. Zero LLM cost.
 
 The LSP and Effect Engine plugins are **pure Python, zero external dependencies** (stdlib only). Semble and Graphify require optional pip packages (`pip install semble`, `pip install graphifyy`). All four install in seconds and survive Hermes updates because they live in `~/.hermes/plugins/`, not in Hermes's core. All timeouts, limits, and cache sizes are configurable via environment variables — no hardcoded settings.
 
@@ -137,6 +139,30 @@ See tokens-per-second in the Hermes TUI status bar, right alongside model name, 
 **Zero external dependencies** — stdlib only. No pip install needed.
 
 1 Hermes hook (no tools or commands).
+
+### 🔧 Plugin Usage Indicators — Adaptive Status Bar
+
+See which plugin toolsets are being used live in the Hermes TUI status bar, displayed adaptively based on terminal width:
+
+```
+# Narrow (<52 cols): active plugin emoji only
+⚕ deepseek ... 🔧⚡
+
+# Medium (52-75 cols): emoji + count for active plugins
+⚕ deepseek · 55% · 🔧3 ⚡1 · 7m
+
+# Full (76+ cols): emoji + name + count (active bright, zero dim)
+⚕ deepseek │ ctx │ [░░] 55% │ 🔧 LSP:3 │ ⚡ Effect:1 │ 🕸️ Graphify:0 │ 🔍 Semble:0 │ 7m
+```
+
+| Plugin | Emoji | Meaning |
+|--------|-------|---------|
+| 🔧 LSP | `🔧` | Code diagnostics & intelligence |
+| ⚡ Effect | `⚡` | Typed effect chains |
+| 🕸️ Graphify | `🕸️` | Code knowledge graph |
+| 🔍 Semble | `🔍` | Semantic code search |
+
+**Zero LLM cost** — uses lightweight in-memory counters read on every status bar refresh.
 
 ### What OpenCode Doesn't Have
 
