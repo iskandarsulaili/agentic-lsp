@@ -578,6 +578,9 @@ def _start_background_build(graph_path: str, project_dir: str) -> None:
             existing = _background_builds[graph_path]
             if existing["status"] in ("running", "done"):
                 return
+        # Evict old completed entries (keep max 20)
+        if len(_background_builds) > 20:
+            _prune_old_builds()
         # Mark running immediately
         _background_builds[graph_path] = {
             "status": "running",
@@ -602,6 +605,7 @@ def _start_background_build(graph_path: str, project_dir: str) -> None:
                 _background_builds[graph_path]["process"] = proc
 
             stdout, stderr = proc.communicate(timeout=120)
+            # Success case handled below after checking returncode
 
             with _bg_build_lock:
                 if _background_builds.get(graph_path, {}).get("status") != "running":
@@ -610,18 +614,34 @@ def _start_background_build(graph_path: str, project_dir: str) -> None:
                     # Verify the file exists
                     if Path(graph_path).exists():
                         _background_builds[graph_path]["status"] = "done"
+                        _background_builds[graph_path]["_finished_at"] = time.time()
                         logger.info("Background graph build succeeded for %s", project_dir)
                         return
                     else:
                         _background_builds[graph_path]["status"] = "failed"
+                        _background_builds[graph_path]["_finished_at"] = time.time()
                         _background_builds[graph_path]["error"] = (
                             "Build succeeded but graph.json still missing"
                         )
                         return
                 _background_builds[graph_path]["status"] = "failed"
+                _background_builds[graph_path]["_finished_at"] = time.time()
                 _background_builds[graph_path]["error"] = (
                     f"Exit {proc.returncode}: {stderr.strip()[:500]}"
                 )
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+            with _bg_build_lock:
+                if _background_builds.get(graph_path, {}).get("status") == "running":
+                    _background_builds[graph_path]["status"] = "failed"
+                    _background_builds[graph_path]["_finished_at"] = time.time()
+                    _background_builds[graph_path]["error"] = (
+                        "Build timed out after 120s"
+                    )
         except Exception as e:
             with _bg_build_lock:
                 if _background_builds.get(graph_path, {}).get("status") == "running":
@@ -644,6 +664,20 @@ def _check_background_build(graph_path: str) -> Optional[str]:
         if info is None:
             return None
         return info.get("status")
+
+
+def _prune_old_builds() -> None:
+    """Remove completed/failed/cancelled entries when the dict exceeds 20."""
+    import time
+    now = time.time()
+    # Keep the 5 most recent terminal entries, remove everything older
+    terminal_entries = [
+        (path, info) for path, info in _background_builds.items()
+        if info.get("status") in ("done", "failed", "cancelled")
+    ]
+    terminal_entries.sort(key=lambda x: x[1].get("_finished_at", 0), reverse=True)
+    for path, _ in terminal_entries[5:]:
+        _background_builds.pop(path, None)
 
 
 def _cancel_background_build(graph_path: str) -> None:
@@ -731,7 +765,7 @@ def _check_graph_exists(graph_path: str) -> Optional[str]:
     if bg_status == "running":
         # Build already in progress — return status for the LLM to relay
         return json.dumps({
-            "success": False,
+            "success": True,
             "status": "building",
             "building": True,
             "build_id": graph_path,
@@ -763,7 +797,7 @@ def _check_graph_exists(graph_path: str) -> Optional[str]:
 
     # Return building status with 3 options for the LLM to present
     return json.dumps({
-        "success": False,
+        "success": True,
         "status": "building",
         "building": True,
         "build_id": graph_path,
