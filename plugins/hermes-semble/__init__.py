@@ -575,6 +575,7 @@ def register(ctx: Any) -> Dict[str, Any]:
 
     # Register tools
     ctx.register_tool(
+        toolset="semble",
         name="semble_search",
         schema={
             "name": "semble_search",
@@ -628,6 +629,7 @@ def register(ctx: Any) -> Dict[str, Any]:
     )
 
     ctx.register_tool(
+        toolset="semble",
         name="semble_find_related",
         schema={
             "name": "semble_find_related",
@@ -671,6 +673,7 @@ def register(ctx: Any) -> Dict[str, Any]:
     )
 
     ctx.register_tool(
+        toolset="semble",
         name="semble_stats",
         schema={
             "name": "semble_stats",
@@ -693,6 +696,7 @@ def register(ctx: Any) -> Dict[str, Any]:
     )
 
     ctx.register_tool(
+        toolset="semble",
         name="semble_reindex",
         schema={
             "name": "semble_reindex",
@@ -716,6 +720,7 @@ def register(ctx: Any) -> Dict[str, Any]:
     )
 
     ctx.register_tool(
+        toolset="semble",
         name="semble_status",
         schema={
             "name": "semble_status",
