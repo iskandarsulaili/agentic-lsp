@@ -580,17 +580,12 @@ def register(ctx: Any) -> Dict[str, Any]:
         schema={
             "name": "semble_search",
         "description": (
-            "Search code using natural language or symbol names via Semble. "
-            "Returns relevant code snippets with exact file paths and line numbers. "
-            "USE INSTEAD OF search_files/grep/terminal for concept-level code queries. "
-            "Uses ~98% fewer tokens than grep+read by returning only matching chunks. "
-            "BEST FOR: 'how is auth handled?', 'find the UserService class', 'where is rate limiting implemented', "
-            "'find all places where errors are logged'. "
-            "NOT good for: exact regex patterns, simple string lookup (use grep for that). "
-            "Semble and grep complement each other — use Semble for semantic/concept search, "
-            "grep via terminal for exact pattern matching. "
-            "Write queries using function/class names or behavior descriptions. "
-            "Navigate directly to the returned file paths — do not grep for the same content."
+                        "Search code by CONCEPT or meaning (not exact string). Returns matching code chunks with file paths and line numbers. "
+            "CRITICAL for automated coding: when the user asks a CONCEPTUAL code question, use this INSTEAD of search_files/grep. "
+            "Saves ~98% of tokens vs grep+read by returning only relevant chunks. "
+            "DO NOT use grep/search_files for conceptual questions — this is faster and returns meaning-based matches. "
+            "BEST FOR: 'find how auth works', 'where is UserService defined', 'find rate limiting logic'. "
+            "NOT good for: exact regex patterns, specific error messages, log grepping (use terminal+grep for those)."
         ),
         "parameters": {
             "type": "object",
@@ -638,11 +633,11 @@ def register(ctx: Any) -> Dict[str, Any]:
         "description": (
             "Find code semantically similar to a known location. "
             "Useful for discovering all implementations of an interface, all callers of a function, "
-            "or all tests for a class. "
-            "USE INSTEAD OF read_file+terminal+grep to manually trace related code. "
-            "Call after semble_search to explore related code without extra grep calls. "
-            "BEST FOR: 'find all callers of this function', 'show me similar implementations'. "
-            "For exact call-site search, use grep via terminal."
+                        "Find code semantically related to a file or symbol — similar concepts, patterns, or connections. "
+            "Useful for discovering all implementations of an interface, all callers of a function, or all tests for a class. "
+            "REPLACES: manually reading a file then grepping for related symbols. "
+            "Call AFTER semble_search to explore related code without extra grep calls. "
+            "BEST FOR: 'find all callers of this function', 'show me similar implementations', 'what else uses this pattern?'"
         ),
         "parameters": {
             "type": "object",
