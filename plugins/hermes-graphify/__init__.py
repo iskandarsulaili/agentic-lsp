@@ -611,8 +611,26 @@ def _start_background_build(graph_path: str, project_dir: str) -> None:
                 if _background_builds.get(graph_path, {}).get("status") != "running":
                     return  # cancelled
                 if proc.returncode == 0:
-                    # Verify the file exists
+                    # Verify the file exists AND has actual nodes
                     if Path(graph_path).exists():
+                        # Quick sanity: check the graph has nodes (not empty)
+                        _node_count = _quick_node_count(graph_path)
+                        if _node_count is not None and _node_count < 5:
+                            # Graph is essentially empty — tree-sitter parsers
+                            # may be missing for this project's languages
+                            _background_builds[graph_path]["status"] = "failed"
+                            _background_builds[graph_path]["_finished_at"] = time.time()
+                            _background_builds[graph_path]["error"] = (
+                                f"Build produced only {_node_count} nodes — "
+                                f"likely missing tree-sitter language parsers. "
+                                f"Install with: pip install tree-sitter-<language>"
+                            )
+                            logger.warning(
+                                "JIT graph produced only %d nodes for %s — "
+                                "missing tree-sitter parsers?",
+                                _node_count, project_dir,
+                            )
+                            return
                         _background_builds[graph_path]["status"] = "done"
                         _background_builds[graph_path]["_finished_at"] = time.time()
                         logger.info("Background graph build succeeded for %s", project_dir)
@@ -703,6 +721,27 @@ def _cancel_background_build(graph_path: str) -> None:
 
 # Capture cwd at import time for stable default repo resolution
 _CWD = os.getcwd()
+
+
+def _quick_node_count(graph_path: str) -> Optional[int]:
+    """Quickly read the node count from a graph.json without loading into networkx.
+    Returns None if the file can't be read or parsed."""
+    try:
+        with open(graph_path) as f:
+            data = json.load(f)
+        # graphify graph.json has a "directed" flag and then node/edge data
+        # The exact structure depends on graphifyy version, but typically
+        # it has a "nodes" key or is a dict with node-name keys.
+        if isinstance(data, dict):
+            if "nodes" in data:
+                return len(data["nodes"])
+            if "directed" in data:
+                return len([k for k in data if k != "directed" and k != "links" and k != "multigraph"])
+        if isinstance(data, list):
+            return len(data)
+        return None
+    except Exception:
+        return None
 
 
 def _resolve_graph_path(repo: str) -> str:
