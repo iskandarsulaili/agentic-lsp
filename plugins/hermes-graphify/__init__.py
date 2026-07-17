@@ -698,6 +698,7 @@ def _start_background_build(graph_path: str, project_dir: str, *, update: bool =
                         entry["status"] = "done"
                         entry["_finished_at"] = time.time()
                         logger.info("Background graph build succeeded for %s", project_dir)
+                        _ensure_gitignore(project_dir)
                         return
                     else:
                         entry["status"] = "failed"
@@ -727,6 +728,35 @@ def _start_background_build(graph_path: str, project_dir: str, *, update: bool =
 
     t = threading.Thread(target=_build_worker, daemon=True)
     t.start()
+
+
+def _ensure_gitignore(project_dir: str) -> None:
+    """Add graphify-out/ to the project's .gitignore if not already present."""
+    gitignore_path = os.path.join(project_dir, ".gitignore")
+    entries = ["graphify-out/", "graphify-out/cache/"]
+
+    try:
+        if os.path.exists(gitignore_path):
+            with open(gitignore_path) as f:
+                existing = f.read()
+            need_append = [e for e in entries if e not in existing]
+            if not need_append:
+                return
+            with open(gitignore_path, "a") as f:
+                f.write("\n# Graphify generated artifacts\n")
+                for e in need_append:
+                    f.write(f"{e}\n")
+            logger.info("Added graphify-out/ to %s", gitignore_path)
+        else:
+            with open(gitignore_path, "w") as f:
+                f.write("# Graphify generated artifacts\n")
+                for e in entries:
+                    f.write(f"{e}\n")
+            logger.info("Created %s with graphify-out/ entries", gitignore_path)
+    except PermissionError:
+        logger.warning("Cannot write .gitignore at %s — skipping", gitignore_path)
+    except OSError as e:
+        logger.warning("Failed to update .gitignore at %s: %s", gitignore_path, e)
 
 
 def _check_background_build(graph_path: str) -> Optional[str]:
@@ -1713,7 +1743,6 @@ def register(ctx: Any) -> Dict[str, Any]:
     # Register slash command
     ctx.register_command(
         name="graphify",
-        toolset="graphify",
         description=(
             "Graphify knowledge graph commands. "
             "Subcommands: status, query <question> [repo], path <source> <target> [repo], "
