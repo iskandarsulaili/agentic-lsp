@@ -13,7 +13,7 @@ DESIGN: Three tools, one workflow:
 AUTO FEATURES (v1.1.0):
   - Auto-builds graph.json on session start (no manual command needed)
   - Auto-updates graph when source files change (after a 5s debounce)
-  - Auto-injects structural context (god nodes + stats) before every LLM call
+  - Auto-injects structural context (god nodes + stats) on first available turn
   - Falls back to JIT build if graph still missing when a graphify tool is called
 
 Requires `graphifyy` package installed (pip install graphifyy).
@@ -992,9 +992,6 @@ def _on_post_tool_call(tool_name: str = "", args: dict | None = None, **kwargs) 
         return
 
     cwd = os.getcwd()
-    graph_path = Path(cwd) / "graphify-out" / "graph.json"
-    if not graph_path.exists():
-        return  # No graph yet — auto-build on session start handles this
 
     # Debounce per directory: cancel any existing timer for this cwd
     with _update_debounce_lock:
