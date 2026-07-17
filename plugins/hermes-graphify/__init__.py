@@ -601,7 +601,7 @@ _engine = _GraphEngine()
 # Stores state for on-demand background graph builds.
 # Key: resolved graph.json path. Value: {status, process, project_dir, error}
 _background_builds: dict = {}
-_bg_build_lock = threading.Lock()
+_bg_build_lock = threading.RLock()  # RLock so _prune_old_builds can acquire nested
 
 
 def _start_background_build(graph_path: str, project_dir: str, *, update: bool = False) -> None:
@@ -746,15 +746,19 @@ def _check_background_build(graph_path: str) -> Optional[str]:
 
 
 def _prune_old_builds() -> None:
-    """Remove completed/failed/cancelled entries when the dict exceeds 20."""
-    # Keep the 5 most recent terminal entries, remove everything older
-    terminal_entries = [
-        (path, info) for path, info in _background_builds.items()
-        if info.get("status") in ("done", "failed", "cancelled")
-    ]
-    terminal_entries.sort(key=lambda x: x[1].get("_finished_at", 0), reverse=True)
-    for path, _ in terminal_entries[5:]:
-        _background_builds.pop(path, None)
+    """Remove completed/failed/cancelled entries when the dict exceeds 20.
+
+    Caller MUST NOT hold _bg_build_lock (this function acquires it).
+    """
+    with _bg_build_lock:
+        # Keep the 5 most recent terminal entries, remove everything older
+        terminal_entries = [
+            (path, info) for path, info in _background_builds.items()
+            if info.get("status") in ("done", "failed", "cancelled")
+        ]
+        terminal_entries.sort(key=lambda x: x[1].get("_finished_at", 0), reverse=True)
+        for path, _ in terminal_entries[5:]:
+            _background_builds.pop(path, None)
 
 
 def _cancel_background_build(graph_path: str) -> None:
