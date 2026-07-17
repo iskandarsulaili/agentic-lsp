@@ -1,6 +1,6 @@
 name: hermes-graphify
-version: "1.0.0"
-description: "Knowledge graph for Hermes — structural code understanding via Graphify. Query dependency graphs, trace call chains, find subsystems, and explain concepts. Complements LSP (per-file depth) and Semble (semantic search) with structural relationships."
+version: "1.1.0"
+description: "Knowledge graph for Hermes via Graphify. Auto-builds on session start, auto-updates on file changes, injects structural context before every LLM call. Query dependency graphs, trace call chains, find subsystems, and explain concepts. Complements LSP (per-file depth) and Semble (semantic search) with structural relationships."
 author: "Nous Research"
 license: "MIT"
 type: "plugin"

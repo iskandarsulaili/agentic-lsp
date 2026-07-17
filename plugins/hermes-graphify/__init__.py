@@ -10,9 +10,13 @@ DESIGN: Three tools, one workflow:
   2. LSP → verify correctness after every edit
   3. Graphify → explain how it connects to everything else
 
-Requires `graphifyy` package installed (pip install graphifyy) and a
-pre-built graph.json (run `graphify extract . && graphify build .` in
-your project root).
+AUTO FEATURES (v1.1.0):
+  - Auto-builds graph.json on session start (no manual command needed)
+  - Auto-updates graph when source files change (after a 5s debounce)
+  - Auto-injects structural context (god nodes + stats) before every LLM call
+  - Falls back to JIT build if graph still missing when a graphify tool is called
+
+Requires `graphifyy` package installed (pip install graphifyy).
 
 Survives Hermes updates by living entirely in ~/.hermes/plugins/.
 """
@@ -76,8 +80,37 @@ except Exception as e:
     _GRAPHIFY_AVAILABLE = False
     _GRAPHIFY_IMPORT_ERROR = f"graphify import error: {e}"
 
+# ---------------------------------------------------------------------------
+# Auto-build state (session lifecycle tracking)
+# ---------------------------------------------------------------------------
+_auto_build_started: bool = False
+_auto_build_lock = threading.Lock()
+_initial_context_injected: bool = False
+
+# Debounced auto-update after file writes
+_update_debounce_timer: Any = None
+_update_debounce_lock = threading.Lock()
+_UPDATE_DEBOUNCE_S = 5.0  # seconds to wait after last write before updating
+
+# File extensions to track for staleness checking
+_SOURCE_EXTENSIONS = frozenset({
+    ".py", ".js", ".ts", ".tsx", ".jsx", ".go", ".rs", ".java", ".kt",
+    ".swift", ".c", ".cpp", ".h", ".hpp", ".rb", ".php", ".scala",
+    ".md", ".mdx", ".rst", ".yaml", ".yml", ".json", ".toml", ".sql",
+    ".css", ".scss", ".less", ".html", ".xml", ".svg",
+})
+
+# Directories to skip during staleness walk
+_SKIP_DIRS = frozenset({
+    ".git", ".svn", "__pycache__", "node_modules", "venv", ".venv",
+    ".tox", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+    "dist", "build", ".eggs", "*.egg-info", ".hermes",
+    "graphify-out", ".graphify",
+})
+
+
 # =============================================================================
-# Configuration from environment
+# Configuration from environment (no hardcoded settings)
 # =============================================================================
 
 
@@ -571,8 +604,12 @@ _background_builds: dict = {}
 _bg_build_lock = threading.Lock()
 
 
-def _start_background_build(graph_path: str, project_dir: str) -> None:
-    """Start graphify extract in a daemon thread.  Idempotent per path."""
+def _start_background_build(graph_path: str, project_dir: str, *, update: bool = False) -> None:
+    """Start graphify extract/update in a daemon thread.  Idempotent per path.
+
+    When *update* is True, runs ``graphify update <dir>`` (incremental
+    re-extract + graph rebuild) instead of a full ``graphify extract``.
+    """
     with _bg_build_lock:
         if graph_path in _background_builds:
             existing = _background_builds[graph_path]
@@ -587,15 +624,24 @@ def _start_background_build(graph_path: str, project_dir: str) -> None:
             "project_dir": project_dir,
             "process": None,
             "error": None,
+            "update": update,
         }
 
     def _build_worker():
         import subprocess
         import time
-        logger.info("Background graph build started for %s", project_dir)
+        mode = "update" if update else "extract"
+        logger.info("Background graph %s started for %s", mode, project_dir)
         try:
+            if update:
+                # Incremental update: re-extract changed files + rebuild graph
+                cmd = ["graphify", "update", project_dir]
+            else:
+                # Full initial extraction
+                cmd = ["graphify", "extract", project_dir, "--code-only"]
+
             proc = subprocess.Popen(
-                ["graphify", "extract", project_dir, "--code-only"],
+                cmd,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             )
             # Store process reference for cancellation
@@ -713,6 +759,208 @@ def _cancel_background_build(graph_path: str) -> None:
             except Exception:
                 pass
         info["status"] = "cancelled"
+
+
+# =============================================================================
+# Auto-build lifecycle hooks
+# =============================================================================
+
+
+def _source_files_changed_since(project_dir: str, since_mtime: float) -> bool:
+    """Quick check: are any source files newer than *since_mtime*?
+
+    Walks top-level and first-level subdirs (avoids deep traversal on
+    large repos). Returns True at the first changed file found.
+    """
+    try:
+        for entry in os.scandir(project_dir):
+            if entry.name.startswith(".") or entry.name in _SKIP_DIRS:
+                continue
+            if entry.is_file():
+                ext = os.path.splitext(entry.name)[1].lower()
+                if ext in _SOURCE_EXTENSIONS:
+                    if entry.stat().st_mtime > since_mtime:
+                        return True
+            elif entry.is_dir():
+                # Walk one level deep into subdirectories
+                try:
+                    for sub in os.scandir(entry.path):
+                        if sub.name.startswith(".") or sub.name in _SKIP_DIRS:
+                            continue
+                        if sub.is_file():
+                            ext = os.path.splitext(sub.name)[1].lower()
+                            if ext in _SOURCE_EXTENSIONS:
+                                if sub.stat().st_mtime > since_mtime:
+                                    return True
+                except (PermissionError, OSError):
+                    continue
+    except (PermissionError, OSError):
+        pass
+    return False
+
+
+def _check_and_auto_build() -> str | None:
+    """Called at session start: auto-build if missing, auto-update if stale.
+
+    Returns a status string for logging, or None if no action was needed.
+    """
+    cwd = os.getcwd()
+    graph_path = os.path.join(cwd, "graphify-out", "graph.json")
+    graph_path_obj = Path(graph_path)
+
+    if not graph_path_obj.parent.exists():
+        return None  # No graphify-out dir at all — nothing to do
+
+    if not graph_path_obj.exists():
+        # Auto-build: graph is missing
+        logger.info("Auto-build: no graph.json found at %s — starting background build", graph_path)
+        _start_background_build(graph_path, cwd, update=False)
+        return "auto-build started"
+
+    # Graph exists — check staleness
+    graph_mtime = graph_path_obj.stat().st_mtime
+    if _source_files_changed_since(cwd, graph_mtime):
+        logger.info("Auto-update: source files changed since last graph build — starting incremental update")
+        _start_background_build(graph_path, cwd, update=True)
+        return "auto-update started"
+
+    logger.debug("Graph is up-to-date")
+    return None
+
+
+def _on_session_start(**kwargs) -> None:
+    """Hook: auto-build graph on first session start."""
+    global _auto_build_started
+    if not _GRAPHIFY_AVAILABLE:
+        return
+    with _auto_build_lock:
+        if _auto_build_started:
+            return
+        _auto_build_started = True
+
+    try:
+        _check_and_auto_build()
+    except Exception as exc:
+        logger.warning("Auto-build on session start failed: %s", exc)
+
+
+def _on_pre_llm_call(**kwargs) -> dict | None:
+    """Hook: inject graph context (god nodes + stats) before every LLM turn.
+
+    Returns context that gets injected into the user message, preserving
+    the system prompt cache. Only injects when a graph exists and is
+    loaded.
+
+    The graph is ALREADY being built by _on_session_start if missing, so
+    by the time the first LLM call happens, the graph may or may not be
+    ready — this checks availability gracefully.
+    """
+    if not _GRAPHIFY_AVAILABLE:
+        return None
+    if not _engine.available():
+        return None
+
+    try:
+        cwd = os.getcwd()
+        graph_path = os.path.join(cwd, "graphify-out", "graph.json")
+        if not Path(graph_path).exists():
+            return None
+
+        G = _engine.get_graph(graph_path)
+
+        # Compact context: stats + top 15 god nodes
+        degrees = [(n, G.degree(n)) for n in G.nodes()]
+        degrees.sort(key=lambda x: -x[1])
+
+        top_lines = []
+        for nid, deg in degrees[:15]:
+            d = G.nodes[nid]
+            label = d.get("label", nid)
+            source = d.get("source_file", "")
+            loc = d.get("source_location", "")
+            loc_str = f":{loc}" if loc else ""
+            filename = os.path.basename(source) if source else "?"
+            top_lines.append(f"  {label} ({deg} edges, {filename}{loc_str})")
+
+        # Count communities
+        communities: set = set()
+        for _, data in G.nodes(data=True):
+            cid = data.get("community")
+            if cid is not None:
+                communities.add(int(cid))
+
+        node_count = G.number_of_nodes()
+        edge_count = G.number_of_edges()
+        community_count = len(communities)
+
+        # Skip context if graph is too small (noise)
+        if node_count < 10:
+            return None
+
+        context = (
+            f"[Project structure]\n"
+            f"Code graph: {node_count} symbols, {edge_count} relationships, "
+            f"{community_count} subsystems\n"
+            f"Most connected symbols:\n"
+            + "\n".join(top_lines) +
+            "\n"
+        )
+
+        return {"context": context}
+    except Exception:
+        return None
+
+
+def _on_post_tool_call(tool_name: str = "", args: dict | None = None, **kwargs) -> None:
+    """Hook: detect file writes and schedule incremental graph update.
+
+    Debounced: waits _UPDATE_DEBOUNCE_S seconds after the last detected
+    write before triggering the update. Prevents rapid-fire rebuilds
+    during bulk edits.
+    """
+    global _update_debounce_timer
+
+    if not _GRAPHIFY_AVAILABLE:
+        return
+
+    # Only react to tools that modify files
+    write_tools = frozenset({"write_file", "patch", "execute_code"})
+    if tool_name not in write_tools:
+        # For terminal commands, check if args suggest file writes
+        if tool_name == "terminal":
+            cmd = ""
+            if isinstance(args, dict):
+                cmd = (args.get("command") or "").strip().lower()
+            write_patterns = (
+                "> ", ">> ", "| tee ", "sed -i", "awk -i",
+                "git add", "git commit", "git mv", "git rm",
+                "mv ", "cp ", "rm ", "touch ",
+                "make", "npx ", "npm run", "pip install",
+                "python -m pytest", "pytest",
+            )
+            if not any(p in cmd for p in write_patterns):
+                return
+        else:
+            return
+
+    cwd = os.getcwd()
+    graph_path = Path(cwd) / "graphify-out" / "graph.json"
+    if not graph_path.exists():
+        return  # No graph yet — auto-build on session start handles this
+
+    # Debounce: cancel previous timer, schedule new one
+    with _update_debounce_lock:
+        if _update_debounce_timer is not None:
+            _update_debounce_timer.cancel()
+
+        def _do_update():
+            with _update_debounce_lock:
+                logger.info("Detected file changes — auto-updating graph")
+                _start_background_build(str(graph_path), cwd, update=True)
+
+        _update_debounce_timer = threading.Timer(_UPDATE_DEBOUNCE_S, _do_update)
+        _update_debounce_timer.daemon = True
+        _update_debounce_timer.start()
 
 
 # =============================================================================
@@ -1371,5 +1619,14 @@ def register(ctx: Any) -> Dict[str, Any]:
         handler=_cmd_graphify,
     )
 
-    logger.info("hermes-graphify plugin registered: 7 tools, 1 command")
+    # Register lifecycle hooks for auto-build and context injection
+    if _GRAPHIFY_AVAILABLE:
+        ctx.register_hook("on_session_start", _on_session_start)
+        ctx.register_hook("pre_llm_call", _on_pre_llm_call)
+        ctx.register_hook("post_tool_call", _on_post_tool_call)
+
+    logger.info(
+        "hermes-graphify plugin registered: 7 tools, 1 command, "
+        "3 hooks (auto-build, context-inject, auto-update)"
+    )
     return {"name": "hermes-graphify", "version": "1.0.0"}

@@ -12,18 +12,22 @@ metadata:
 
 # Agentic Coding Enhanced
 
-This skill teaches you to use the **hermes-effect-engine** and **hermes-lsp** plugins to produce higher-quality code with fewer iterations.
+This skill teaches you to use the **hermes-effect-engine**, **hermes-lsp**, and **hermes-graphify** plugins to produce higher-quality code with fewer iterations.
+
+The graphify plugin now **auto-builds** the knowledge graph on session start and **auto-updates** it whenever source files change — no manual `/graphify` needed. Structural context (god nodes, graph stats) is also **auto-injected** before every LLM call so you always have architectural awareness.
 
 ## Workflow
 
 ### 1. Before Writing Code — Understand the Codebase
 
-Use LSP tools to explore before editing:
+Use LSP and Graphify tools to explore before editing. The graph is already built:
 
 ```
 lsp_hover filepath="src/main.py" line=42 character=10
 lsp_definition filepath="src/main.py" line=42 character=10
 lsp_completions filepath="src/main.py" line=50 character=0
+graphify_god_nodes top_n=10           # see most connected symbols
+graphify_query question="how does auth work?"  # trace architecture
 ```
 
 ### 2. While Writing Code — Use Effect-Typed Operations
