@@ -1,22 +1,29 @@
-"""
-hermes-semble — Code search for Hermes via Semble.
+"""hermes-semble - Code search for Hermes via Semble.
 
 Hybrid BM25 + semantic (Model2Vec) code search with tree-sitter AST chunking.
 Uses ~98% fewer tokens than grep+read by returning only relevant code snippets.
 
+AUTO FEATURES (v1.1.0):
+  - Auto-indexes project on session start (no manual command needed)
+  - Auto-reindexes when source files change (after 10s debounce)
+  - Uses runtime cwd so 'cd' mid-session is respected
+
 DESIGN: Semble and grep complement each other:
-  - Semble: semantic/concept search — "how is auth handled?", "find UserService"
-  - grep: exact pattern/regex search — "grep -rn 'DEBUG_LOG' src/", "find all callers of function X"
-  - read: full file context — already provided via Hermes read_file tool
+  - Semble: semantic/concept search - "how is auth handled?", "find UserService"
+    Best for: conceptual questions, unknown filenames, cross-file patterns
+  - grep: exact pattern/regex search - "grep -rn 'DEBUG_LOG' src/", regex patterns
+    Best for: exact strings, error messages, counting, compound grep
+  - read: full file context - already provided via Hermes read_file tool
 
 Use them together. Semble narrows down what to look at; grep finds exact occurrences;
 read gets full context.
 
-Two complementary modes:
-  1. semble_search — natural-language or symbol code search across the repo
-  2. semble_find_related — discover code similar to a known location
-  3. semble_stats — index statistics (files, chunks, languages)
-  4. semble_reindex — force reindex after file changes
+Five tools:
+  1. semble_search - natural-language or symbol code search across the repo
+  2. semble_find_related - discover code similar to a known location
+  3. semble_stats - index statistics (files, chunks, languages)
+  4. semble_reindex - force reindex after file changes
+  5. semble_status - check engine availability and cache state
 
 Survives Hermes updates by living entirely in ~/.hermes/plugins/.
 Requires `semble` package installed (pip install semble).
@@ -272,6 +279,8 @@ class _SembleEngine:
         line: int,
         top_k: int = _DEFAULT_TOP_K,
         max_snippet_lines: int | None = _DEFAULT_MAX_SNIPPET_LINES,
+        filter_languages: Optional[List[str]] = None,
+        filter_paths: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Find code similar to a known location."""
         index = self.get_index(path)
@@ -281,6 +290,10 @@ class _SembleEngine:
         results = index.find_related(chunk, top_k=top_k, max_snippet_lines=max_snippet_lines)
         output = []
         for r in results:
+            if filter_languages and r.chunk.language not in filter_languages:
+                continue
+            if filter_paths and not any(fp in r.chunk.file_path for fp in filter_paths):
+                continue
             output.append({
                 "file_path": r.chunk.file_path,
                 "start_line": r.chunk.start_line,
@@ -337,21 +350,163 @@ _engine = _SembleEngine()
 
 
 # =============================================================================
-# Helper
+# Auto-index lifecycle hooks
+# =============================================================================
+
+_auto_indexed: set[str] = set()  # set of project dirs that have been auto-indexed
+_auto_index_lock = threading.Lock()
+
+# Debounced auto-reindex after file writes
+_reindex_debounce_timers: dict[str, threading.Timer] = {}  # cwd -> Timer
+_reindex_debounce_lock = threading.Lock()
+_REINDEX_DEBOUNCE_S = 10.0  # seconds to wait after last write before reindexing
+_REINDEX_SNIPPET_EXTENSIONS = frozenset({
+    ".py", ".js", ".ts", ".tsx", ".jsx", ".go", ".rs", ".java", ".kt",
+    ".swift", ".c", ".cpp", ".h", ".hpp", ".rb", ".php", ".scala",
+    ".md", ".mdx", ".yaml", ".yml", ".json", ".toml", ".sql",
+    ".css", ".scss", ".html", ".xml",
+})
+_REINDEX_SKIP_DIRS = frozenset({
+    ".git", "__pycache__", "node_modules", "venv", ".venv",
+    ".tox", ".mypy_cache", ".pytest_cache", "dist", "build",
+    ".hermes", ".eggs",
+})
+
+
+def _index_is_up_to_date(project_dir: str) -> bool:
+    """Quick check: are there any source files newer than the Semble disk cache?
+    
+    Returns True if the index is fresh, False if a reindex might be needed.
+    Conservative: may return False if uncertain (triggers a recheck via Semble's own staleness logic).
+    """
+    from semble.cache import find_index_from_cache_folder
+    cache_path = find_index_from_cache_folder(str(Path(project_dir).resolve()))
+    if cache_path is None:
+        return False
+    cache_mtime = Path(cache_path).stat().st_mtime
+    # Walk up to 3 levels deep, check if any source file is newer
+    try:
+        for root, dirs, files in os.walk(project_dir, topdown=True, followlinks=False):
+            rel = os.path.relpath(root, project_dir)
+            depth = 0 if rel == "." else rel.count(os.sep) + 1
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in _REINDEX_SKIP_DIRS]
+            if depth >= 3:
+                dirs.clear()
+            for f in files:
+                ext = os.path.splitext(f)[1].lower()
+                if ext not in _REINDEX_SNIPPET_EXTENSIONS:
+                    continue
+                try:
+                    if os.path.getmtime(os.path.join(root, f)) > cache_mtime:
+                        return False
+                except (OSError, PermissionError):
+                    continue
+    except (PermissionError, OSError):
+        pass
+    return True
+
+
+def _on_session_start(session_id: str = "", platform: str = "", **kwargs) -> None:
+    """Hook: pre-index the current project on session start."""
+    if not _engine.available():
+        return
+    if platform and platform not in ("cli", "tui", ""):
+        return
+    cwd = os.getcwd()
+    with _auto_index_lock:
+        if cwd in _auto_indexed:
+            return
+        _auto_indexed.add(cwd)
+    # Check if index needs rebuilding (fast mtime check)
+    try:
+        if _index_is_up_to_date(cwd):
+            return
+        logger.info("Auto-indexing %s on session start", cwd)
+        _engine.get_index(cwd)
+    except Exception as exc:
+        logger.warning("Auto-index on session start failed: %s", exc)
+
+
+def _on_session_reset(**kwargs) -> None:
+    """Hook: allow re-index on session reset (/new)."""
+    if not _engine.available():
+        return
+    with _auto_index_lock:
+        _auto_indexed.discard(os.getcwd())
+
+
+def _on_post_tool_call(tool_name: str = "", args: dict | None = None, **kwargs) -> None:
+    """Hook: detect file writes and schedule debounced reindex."""
+    if not _engine.available():
+        return
+    if not _tool_is_writing(tool_name, args):
+        return
+    cwd = os.getcwd()
+    
+    def _do_reindex():
+        with _reindex_debounce_lock:
+            _reindex_debounce_timers.pop(cwd, None)
+            try:
+                logger.info("Detected file changes — reindexing %s", cwd)
+                _engine.reindex(cwd)
+            except Exception as exc:
+                logger.warning("Auto-reindex failed: %s", exc)
+    
+    with _reindex_debounce_lock:
+        existing = _reindex_debounce_timers.pop(cwd, None)
+        if existing is not None:
+            existing.cancel()
+        timer = threading.Timer(_REINDEX_DEBOUNCE_S, _do_reindex)
+        timer.daemon = True
+        _reindex_debounce_timers[cwd] = timer
+        timer.start()
+
+
+def _on_session_end(**kwargs) -> None:
+    """Hook: clean up debounce timer for current cwd."""
+    if not _engine.available():
+        return
+    cwd = os.getcwd()
+    with _reindex_debounce_lock:
+        timer = _reindex_debounce_timers.pop(cwd, None)
+        if timer is not None:
+            timer.cancel()
+
+
+def _tool_is_writing(tool_name: str, args: dict | None) -> bool:
+    """Heuristic: did this tool call likely write to project source files?"""
+    if tool_name in ("write_file", "patch"):
+        return True
+    if tool_name == "execute_code":
+        return True
+    if tool_name == "terminal":
+        cmd = (args.get("command") or "").strip() if isinstance(args, dict) else ""
+        if ">" in cmd:
+            return True
+        file_cmds = [" sed", "sed ", "git add", "git commit", "git mv", "git rm",
+                     "mv ", "cp ", "rm ", "touch ", "npx ", "npm run"]
+        lower_cmd = cmd.lower()
+        for pat in file_cmds:
+            if pat in lower_cmd:
+                return True
+        build_cmds = ("make", "cmake", "cargo build", "go build", "tsc", "vite build", "next build")
+        if any(cmd.startswith(b) for b in build_cmds):
+            return True
+    return False
+
+
+# =============================================================================
+# Updated tool handlers with content_type and filter support
 # =============================================================================
 
 
-# Capture cwd at import time for stable default repo resolution
-_CWD = os.getcwd()
-
-
 def _resolve_repo(repo: str) -> str:
-    """Resolve ``repo`` parameter: if empty, use cwd; otherwise return as-is (local path).
+    """Resolve ``repo`` parameter: if empty, use runtime cwd.
 
-    Captures cwd at import time so it's stable across the session.
+    Uses os.getcwd() at runtime so it follows directory changes mid-session.
     """
     if not repo or repo.strip() == "":
-        return _CWD
+        return os.getcwd()
     return repo.strip()
 
 
@@ -415,7 +570,13 @@ def _handle_semble_find_related(args: dict, **kwargs: Any) -> str:
         return json.dumps({"success": False, "error": "file_path is required"})
 
     try:
-        results = _engine.find_related(repo, file_path, line, top_k=top_k, max_snippet_lines=max_snippet_lines)
+        results = _engine.find_related(
+            repo, file_path, line,
+            top_k=top_k,
+            max_snippet_lines=max_snippet_lines,
+            filter_languages=args.get("filter_languages", None),
+            filter_paths=args.get("filter_paths", None),
+        )
         return json.dumps({
             "success": True,
             "results": results,
@@ -511,7 +672,7 @@ def _cmd_semble(raw_args: str) -> str:
         elif subcommand == "search":
             if not arg:
                 return "Usage: /semble search <query>"
-            repo = _CWD
+            repo = _resolve_repo("")
             result = json.loads(_handle_semble_search({"query": arg, "repo": repo}))
             if not result.get("success"):
                 return f"Error: {result.get('error')}"
@@ -530,7 +691,7 @@ def _cmd_semble(raw_args: str) -> str:
             return "\n".join(lines)
 
         elif subcommand == "stats":
-            repo = arg if arg else _CWD
+            repo = arg if arg else _resolve_repo("")
             result = json.loads(_handle_semble_stats({"repo": repo}))
             if not result.get("success"):
                 return f"Error: {result.get('error')}"
@@ -543,7 +704,7 @@ def _cmd_semble(raw_args: str) -> str:
             )
 
         elif subcommand == "reindex":
-            repo = arg if arg else _CWD
+            repo = arg if arg else _resolve_repo("")
             result = json.loads(_handle_semble_reindex({"repo": repo}))
             return f"Reindexed {repo}: {result.get('message', 'ok')}"
 
@@ -580,12 +741,15 @@ def register(ctx: Any) -> Dict[str, Any]:
         schema={
             "name": "semble_search",
         "description": (
-                        "Search code by CONCEPT or meaning (not exact string). Returns matching code chunks with file paths and line numbers. "
-            "CRITICAL for automated coding: when the user asks a CONCEPTUAL code question, use this INSTEAD of search_files/grep. "
-            "Saves ~98% of tokens vs grep+read by returning only relevant chunks. "
-            "DO NOT use grep/search_files for conceptual questions — this is faster and returns meaning-based matches. "
-            "BEST FOR: 'find how auth works', 'where is UserService defined', 'find rate limiting logic'. "
-            "NOT good for: exact regex patterns, specific error messages, log grepping (use terminal+grep for those)."
+            'Search code by CONCEPT or meaning. Returns matching chunks with file paths and line numbers. '
+            '\n\nWHEN TO USE vs grep:'
+            '\n  Semble (this tool): conceptual questions, unknown filenames, natural-language queries, '
+            '\n    finding implementations, exploring unfamiliar code \u2014 "how does auth work?", "find UserService", '
+            '\n    "show rate limiting logic". Saves ~98% tokens vs grep+read.'
+            '\n  grep/terminal: exact patterns, regex, error messages, log grepping, counting occurrences, '
+            '\n    TODO/FIXME lists, specific IP/URL patterns \u2014 "grep -rn DEBUG_LOG src/", '
+            '\n    "grep for validate_token callers". Use git grep for committed code.'
+            '\n\nAutomatically indexed on session start. Re-indexes after file changes (10s debounce).'
         ),
         "parameters": {
             "type": "object",
@@ -633,11 +797,11 @@ def register(ctx: Any) -> Dict[str, Any]:
         "description": (
             "Find code semantically similar to a known location. "
             "Useful for discovering all implementations of an interface, all callers of a function, "
-                        "Find code semantically related to a file or symbol — similar concepts, patterns, or connections. "
-            "Useful for discovering all implementations of an interface, all callers of a function, or all tests for a class. "
-            "REPLACES: manually reading a file then grepping for related symbols. "
+            "or all tests for a class. "
             "Call AFTER semble_search to explore related code without extra grep calls. "
-            "BEST FOR: 'find all callers of this function', 'show me similar implementations', 'what else uses this pattern?'"
+            "BEST FOR: 'find all callers of this function', 'show me similar implementations', "
+            "'what else uses this pattern?'"
+            "Use filter_languages to narrow to a specific language."
         ),
         "parameters": {
             "type": "object",
@@ -663,6 +827,16 @@ def register(ctx: Any) -> Dict[str, Any]:
                     "type": "integer",
                     "description": "Lines of source per result (0=location only, 10=default, null=full chunk).",
                     "default": _DEFAULT_MAX_SNIPPET_LINES,
+                },
+                "filter_languages": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional: only return results from these languages (e.g. ['python', 'typescript']).",
+                },
+                "filter_paths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional: only return results from these file paths (repo-relative).",
                 },
             },
             "required": ["file_path", "line"],
@@ -746,5 +920,15 @@ def register(ctx: Any) -> Dict[str, Any]:
         handler=_cmd_semble,
     )
 
-    logger.info("hermes-semble plugin registered: 5 tools, 1 command")
-    return {"name": "hermes-semble", "version": "1.0.0"}
+    # Register hooks for auto-indexing
+    if _engine.available():
+        ctx.register_hook("on_session_start", _on_session_start)
+        ctx.register_hook("on_session_reset", _on_session_reset)
+        ctx.register_hook("post_tool_call", _on_post_tool_call)
+        ctx.register_hook("on_session_end", _on_session_end)
+
+    logger.info(
+        "hermes-semble plugin registered: 5 tools, 1 command%s",
+        f", {4} hooks" if _engine.available() else "",
+    )
+    return {"name": "hermes-semble", "version": "1.1.0"}

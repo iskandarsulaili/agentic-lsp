@@ -1,20 +1,22 @@
 ---
 name: agentic-coding-enhanced
-description: "Use when performing agentic coding tasks that benefit from typed error handling, structured concurrency, dependency injection, and real-time LSP diagnostics. Provides self-verifying edit workflow using hermes-effect-engine and hermes-lsp plugins."
-version: 1.1.0
+description: "Use when performing agentic coding tasks that benefit from hybrid semantic+lexical search, typed error handling, structured concurrency, dependency injection, and real-time LSP diagnostics. Provides self-verifying edit workflow using hermes-semble, hermes-effect-engine, hermes-graphify and hermes-lsp plugins."
+version: 1.2.0
 author: Hermes Agent
 license: MIT
 metadata:
   hermes:
-    tags: [coding, lsp, effect, typed-errors, code-quality, verification, self-correcting]
+    tags: [coding, lsp, effect, typed-errors, code-quality, verification, self-correcting, search, semantic]
     related_skills: [hermes-self-improving-architecture, hermes-agent-skill-authoring]
 ---
 
 # Agentic Coding Enhanced
 
-This skill teaches you to use the **hermes-effect-engine**, **hermes-lsp**, and **hermes-graphify** plugins to produce higher-quality code with fewer iterations.
+This skill teaches you to use the **hermes-effect-engine**, **hermes-lsp**, **hermes-graphify**, and **hermes-semble** plugins to produce higher-quality code with fewer iterations.
 
-The graphify plugin now **auto-builds** the knowledge graph on session start and **auto-updates** it whenever source files change — no manual `/graphify` needed. Structural context (god nodes, graph stats) is also **auto-injected** before every LLM call so you always have architectural awareness.
+The graphify plugin now **auto-builds** the knowledge graph on session start and **auto-updates** it whenever source files change. Structural context (god nodes, graph stats) is also **auto-injected** on the first available turn.
+
+The **hermes-semble** plugin provides **semantic code search** — find code by concept, not just by exact string. It's auto-indexed on session start and auto-updated on file changes. Use it alongside grep for maximum coverage.
 
 ## Workflow
 
@@ -28,6 +30,25 @@ lsp_definition filepath="src/main.py" line=42 character=10
 lsp_completions filepath="src/main.py" line=50 character=0
 graphify_god_nodes top_n=10           # see most connected symbols
 graphify_query question="how does auth work?"  # trace architecture
+```
+
+### 1b. Find Code by Concept with Semble
+
+Before grepping, try semantic search for conceptual questions:
+
+```
+semble_search query="how is authentication handled"  # finds relevant code by meaning
+semble_search query="UserService" filter_languages=["python"]  # symbol lookup, Python only
+semble_search query="rate limiting logic" top_k=3  # narrower results
+```
+
+Use **Semble** when you don't know the filename or want to find code by what it DOES.
+Use **grep** (`search_files`, `terminal "grep -rn ..."`) for exact patterns, regex, error messages, or counting occurrences.
+
+When Semble finds a relevant file, use `find_related` to discover similar code:
+
+```
+semble_find_related file_path="src/auth/service.py" line=42
 ```
 
 ### 2. While Writing Code — Use Effect-Typed Operations
