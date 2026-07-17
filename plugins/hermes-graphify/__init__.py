@@ -30,6 +30,7 @@ import os
 import re
 import sys
 import threading
+import time
 from array import array
 from collections import OrderedDict
 from pathlib import Path
@@ -87,7 +88,7 @@ _auto_build_started: set[str] = set()  # set of project dirs that have been chec
 _auto_build_lock = threading.Lock()
 
 # Debounced auto-update after file writes
-_update_debounce_timer: Any = None
+_update_debounce_timers: dict[str, threading.Timer] = {}  # cwd -> Timer
 _update_debounce_lock = threading.Lock()
 _UPDATE_DEBOUNCE_S = 5.0  # seconds to wait after last write before updating
 
@@ -710,6 +711,7 @@ def _start_background_build(graph_path: str, project_dir: str, *, update: bool =
             with _bg_build_lock:
                 if _background_builds.get(graph_path, {}).get("status") == "running":
                     _background_builds[graph_path]["status"] = "failed"
+                    _background_builds[graph_path]["_finished_at"] = time.time()
                     _background_builds[graph_path]["error"] = str(e)
 
     t = threading.Thread(target=_build_worker, daemon=True)
@@ -880,11 +882,10 @@ def _on_pre_llm_call(
 ) -> dict | None:
     """Hook: inject graph context (god nodes + stats) before LLM calls.
 
-    Only injects on the **first turn** of a session, to give the agent
-    architectural awareness without wasting tokens on every subsequent
-    turn.  On follow-up turns the agent already has the graph context
-    from the first turn's history, and can use graphify_query directly
-    if it needs more detail.
+    Injects on the **first turn where the graph is available** — this
+    may be turn 2 or 3 if the background build from on_session_start
+    hasn't finished yet.  Once injected, the guard skips subsequent
+    turns (the agent retains context in conversation history).
 
     Returns context that gets injected into the user message, preserving
     the system prompt cache.
@@ -894,16 +895,23 @@ def _on_pre_llm_call(
     if not _engine.available():
         return None
 
-    # Only inject on first turn — avoids wasting tokens on every reply.
-    # The agent retains graph context in conversation history from turn 1.
-    if not is_first_turn:
-        return None
-
     try:
         cwd = os.getcwd()
         graph_path = os.path.join(cwd, "graphify-out", "graph.json")
-        if not Path(graph_path).exists():
+        graph_file = Path(graph_path)
+
+        # No graph file yet (build still running) — skip this turn.
+        # Context will be injected on a later turn when the file exists.
+        if not graph_file.exists():
             return None
+
+        # Check if we already injected context for this graph.
+        # Uses the graph's mtime as a version stamp so re-builds re-inject.
+        graph_key = f"{graph_path}:{graph_file.stat().st_mtime_ns}"
+        with _auto_build_lock:
+            if graph_key in _auto_build_started:
+                return None
+            _auto_build_started.add(graph_key)
 
         G = _engine.get_graph(graph_path)
 
@@ -921,16 +929,19 @@ def _on_pre_llm_call(
             filename = os.path.basename(source) if source else "?"
             top_lines.append(f"  {label} ({deg} edges, {filename}{loc_str})")
 
-        # Count communities
-        communities: set = set()
-        for _, data in G.nodes(data=True):
-            cid = data.get("community")
-            if cid is not None:
-                communities.add(int(cid))
+        # Count communities (cached in graph metadata after first computation)
+        community_count = G.graph.get("_community_count")
+        if community_count is None:
+            communities: set = set()
+            for _, data in G.nodes(data=True):
+                cid = data.get("community")
+                if cid is not None:
+                    communities.add(int(cid))
+            community_count = len(communities)
+            G.graph["_community_count"] = community_count
 
         node_count = G.number_of_nodes()
         edge_count = G.number_of_edges()
-        community_count = len(communities)
 
         # Skip context if graph is too small (noise)
         if node_count < 10:
@@ -953,16 +964,11 @@ def _on_pre_llm_call(
 def _on_post_tool_call(tool_name: str = "", args: dict | None = None, **kwargs) -> None:
     """Hook: detect file writes and schedule incremental graph update.
 
-    Debounced: waits _UPDATE_DEBOUNCE_S seconds after the last detected
-    write before triggering the update. Prevents rapid-fire rebuilds
-    during bulk edits.
-
-    CWD is captured at **timer-fire time** (not schedule time) so a
-    directory change within the debounce window doesn't pollute the
-    wrong project's graph.
+    Debounced per-project-directory: waits _UPDATE_DEBOUNCE_S seconds
+    after the last detected write before triggering the update.
+    Per-directory timers prevent two concurrent sessions (gateway mode,
+    multiple users) from interfering with each other.
     """
-    global _update_debounce_timer
-
     if not _GRAPHIFY_AVAILABLE:
         return
 
@@ -970,29 +976,42 @@ def _on_post_tool_call(tool_name: str = "", args: dict | None = None, **kwargs) 
     if not _tool_is_writing(tool_name, args):
         return
 
-    graph_path = Path(os.getcwd()) / "graphify-out" / "graph.json"
+    cwd = os.getcwd()
+    graph_path = Path(cwd) / "graphify-out" / "graph.json"
     if not graph_path.exists():
         return  # No graph yet — auto-build on session start handles this
 
-    # Debounce: cancel previous timer, schedule new one.
-    # CWD is read inside _do_update (at fire time), not captured here.
+    # Debounce per directory: cancel any existing timer for this cwd
     with _update_debounce_lock:
-        if _update_debounce_timer is not None:
-            _update_debounce_timer.cancel()
+        existing = _update_debounce_timers.pop(cwd, None)
+        if existing is not None:
+            existing.cancel()
 
         def _do_update():
-            """Fire the update, reading cwd at timer-fire time."""
+            """Fire the update, reading cwd from the closure."""
             with _update_debounce_lock:
-                current_cwd = os.getcwd()
-                current_graph = Path(current_cwd) / "graphify-out" / "graph.json"
+                _update_debounce_timers.pop(cwd, None)
+                current_graph = Path(cwd) / "graphify-out" / "graph.json"
                 if not current_graph.exists():
                     return
-                logger.info("Detected file changes — auto-updating graph in %s", current_cwd)
-                _start_background_build(str(current_graph), current_cwd, update=True)
+                logger.info("Detected file changes — auto-updating graph in %s", cwd)
+                _start_background_build(str(current_graph), cwd, update=True)
 
-        _update_debounce_timer = threading.Timer(_UPDATE_DEBOUNCE_S, _do_update)
-        _update_debounce_timer.daemon = True
-        _update_debounce_timer.start()
+        timer = threading.Timer(_UPDATE_DEBOUNCE_S, _do_update)
+        timer.daemon = True
+        _update_debounce_timers[cwd] = timer
+        timer.start()
+
+
+def _on_session_end(session_id: str = "", **kwargs) -> None:
+    """Hook: clean up debounce timer for current cwd on session end."""
+    if not _GRAPHIFY_AVAILABLE:
+        return
+    cwd = os.getcwd()
+    with _update_debounce_lock:
+        timer = _update_debounce_timers.pop(cwd, None)
+        if timer is not None:
+            timer.cancel()
 
 
 def _tool_is_writing(tool_name: str, args: dict | None) -> bool:
@@ -1697,6 +1716,7 @@ def register(ctx: Any) -> Dict[str, Any]:
     if _GRAPHIFY_AVAILABLE:
         ctx.register_hook("on_session_start", _on_session_start)
         ctx.register_hook("on_session_reset", _on_session_reset)
+        ctx.register_hook("on_session_end", _on_session_end)
         ctx.register_hook("pre_llm_call", _on_pre_llm_call)
         ctx.register_hook("post_tool_call", _on_post_tool_call)
 
