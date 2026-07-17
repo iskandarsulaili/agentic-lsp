@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/iskandarsulaili/hermes-ultimate-coding/main/assets/logo-dark.svg">
-    <img src="https://raw.githubusercontent.com/iskandarsulaili/hermes-ultimate-coding/main/assets/logo-light.svg" alt="hermes-ultimate-coding" width="480">
+    <img src="https://raw.githubusercontent.com/iskandarsulaili/hermes-ultimate-coding/main/assets/logo-light.svg" alt="hermes-ultimate-coding" width="480" style="max-width: 100%;">
   </picture>
 </p>
 
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  Effect-ts functional architecture • LSP code intelligence • Semble semantic code search • Graphify knowledge graph • t/s status bar • Plugin usage indicators • 24 tools • Zero deps (stdlib)
+  Effect-ts functional architecture • LSP code intelligence • Semble semantic code search • Graphify knowledge graph • t/s status bar • Plugin usage indicators • 23 tools • Stdlib-only core
 </p>
 
 <p align="center">
@@ -24,13 +24,14 @@
   <a href="https://github.com/iskandarsulaili/hermes-ultimate-coding"><img alt="GitHub" src="https://img.shields.io/badge/GitHub-hermes--ultimate--coding-2ea44f?style=flat-square&logo=github"></a>
   <a href="https://github.com/iskandarsulaili/hermes-ultimate-coding/blob/main/LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"></a>
   <a href="#"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-blue?style=flat-square&logo=python"></a>
-  <a href="#"><img alt="Zero deps" src="https://img.shields.io/badge/dependencies-stdlib-success?style=flat-square"></a>
+  <a href="#"><img alt="LSP+EE: stdlib only" src="https://img.shields.io/badge/LSP%2BEE-stdlib%20only-success?style=flat-square"></a>
+  <a href="#"><img alt="Semble+Graphify: optional pip" src="https://img.shields.io/badge/Semble%2BGraphify-optional%20pip-lightgrey?style=flat-square"></a>
   <a href="https://github.com/sponsors/iskandarsulaili"><img alt="Sponsor" src="https://img.shields.io/badge/sponsor-30363D?style=flat-square&logo=GitHub-Sponsors&logoColor=EA4AAA"></a>
 </p>
 
 ---
 
-**hermes-ultimate-coding** is the ultimate vibe coding stack for [Hermes AI agent](https://hermes-agent.nousresearch.com). Five plugins, 24 tools. Everything you need to turn Hermes into a self-correcting, codebase-aware AI coding agent:
+**hermes-ultimate-coding** is the ultimate vibe coding stack for [Hermes AI agent](https://hermes-agent.nousresearch.com). Five plugins, 23 tools. Everything you need to turn Hermes into a self-correcting, codebase-aware AI coding agent:
 
 **1. Effect-ts functional architecture** — Typed errors, DI container with cycle detection, structured concurrency via Scope + Fiber. Every operation is composable, typed, and error-tracked. No silent failures.
 
@@ -38,13 +39,13 @@
 
 **3. Semble semantic code search** — Hybrid BM25 + semantic embeddings. Find code by what it *does*, not just by what characters it contains. ~98% fewer tokens than grep+read.
 
-**4. Graphify knowledge graph** — Dependency graphs, call chains, subsystem detection, shortest paths between concepts. Understand how everything connects.
+**4. Graphify knowledge graph** — Dependency graphs, call chains, subsystem detection, shortest paths between concepts. Understand how everything connects. Auto-builds on first use; auto-adds `graphify-out/` to the repo's `.gitignore`.
 
 **5. t/s status bar** — Real-time tokens-per-second in the Hermes TUI status bar. See generation speed alongside model, context %, and elapsed time. Zero deps (stdlib only).
 
 **6. Plugin usage indicators** — TUI status bar shows live 🔧⚡🕸️🔍 indicators for plugin tool usage, adaptively from emoji-only to full names+counts depending on terminal width. Zero LLM cost.
 
-The LSP and Effect Engine plugins are **pure Python, zero external dependencies** (stdlib only). Semble and Graphify require optional pip packages (`pip install semble`, `pip install graphifyy`). All four install in seconds and survive Hermes updates because they live in `~/.hermes/plugins/`, not in Hermes's core. All timeouts, limits, and cache sizes are configurable via environment variables — no hardcoded settings.
+The LSP and Effect Engine plugins are **pure Python, zero external dependencies** (stdlib only). Semble and Graphify require optional pip packages (`pip install semble`, `pip install graphifyy`). All five install in seconds and survive Hermes updates because they live in `~/.hermes/plugins/`, not in Hermes's core. All timeouts, limits, and cache sizes are configurable via environment variables — no hardcoded settings.
 
 ## ✨ Features
 
@@ -119,6 +120,7 @@ Structural code understanding via dependency graphs. Complements LSP (per-file d
 | Subsystem contents | `graphify_community` | "what's in community 0?" |
 
 **Requires:** `pip install graphifyy` (optional — plugin loads without it, tools return helpful error)
+**Auto-.gitignore:** On successful build, automatically adds `graphify-out/` to the target repo's `.gitignore`.
 
 7 Hermes tools + `/graphify` slash command.
 
@@ -173,10 +175,12 @@ See which plugin toolsets are being used live in the Hermes TUI status bar, disp
 | **Project root cache** | ✓ — caches root discovery | ✗ — re-discovers every file |
 | **Thread safety** | ✓ — every shared state has a lock | ✗ — single-threaded only |
 | **Timeouts on every I/O** | ✓ — reads, writes, stops all have configurable timeouts | Partial |
-| **Environment variable configuration** | ✓ — 30+ env vars for all timeouts/limits | ✗ — hardcoded |
+| **Environment variable configuration** | ✓ — 39 env vars for all timeouts/limits | ✗ — hardcoded |
 | **Cross-repo LSP fallback** | ✓ — queries other repos on miss | ✗ — single workspace only |
 | **Survives agent updates** | ✓ — lives in user plugin dir | ✗ — bundled in monorepo |
 | **Agent-agnostic** | ✓ — works with Hermes, OpenCode, Cline, any plugin system | ✗ — OpenCode only |
+| **Auto-.gitignore on graph build** | ✓ — appends `graphify-out/` to repo's `.gitignore` | ✗ — no graph at all |
+| **JIT auto-build** | ✓ — graphify builds on first use if missing | ✗ — no graph at all |
 
 ## ⚡ Quick Start
 
@@ -196,6 +200,7 @@ cp -r /tmp/hermes-ultimate-coding/plugins/hermes-effect-engine ~/.hermes/plugins
 cp -r /tmp/hermes-ultimate-coding/plugins/hermes-semble ~/.hermes/plugins/hermes-semble
 cp -r /tmp/hermes-ultimate-coding/plugins/hermes-graphify ~/.hermes/plugins/hermes-graphify
 cp -r /tmp/hermes-ultimate-coding/plugins/hermes-tps ~/.hermes/plugins/hermes-tps
+cp -r /tmp/hermes-ultimate-coding/plugins/_shared ~/.hermes/plugins/_shared
 
 # Clean up
 rm -rf /tmp/hermes-ultimate-coding
@@ -206,7 +211,11 @@ rm -rf /tmp/hermes-ultimate-coding
 ### Enable Plugins
 
 ```bash
-hermes config set plugins.enabled '["hermes-lsp","hermes-effect-engine","hermes-semble","hermes-graphify","hermes-tps"]'
+hermes plugins enable hermes-lsp
+hermes plugins enable hermes-effect-engine
+hermes plugins enable hermes-semble
+hermes plugins enable hermes-graphify
+hermes plugins enable hermes-tps
 ```
 
 ### Install Optional Dependencies
@@ -253,6 +262,10 @@ pip install graphifyy
 │   ┌──────────────────────────────────────────────────────────┐   │
 │   │  hermes-effect-engine (functional core for all tools)    │   │
 │   │  effect_run • effect_scope • effect_service • inspect   │   │
+│   └──────────────────────────────────────────────────────────┘   │
+│                                                                  │
+│   ┌──────────────────────────────────────────────────────────┐   │
+│   │  hermes-tps (t/s status bar + plugin usage indicators)  │   │
 │   └──────────────────────────────────────────────────────────┘   │
 │                                                                  │
 │   Workflow:                                                      │
@@ -317,15 +330,18 @@ This eliminates the most common failure mode of AI coding agents: **silently shi
 │   └── __init__.py           # _SembleEngine, BM25+semantic hybrid search
 │                              # Thread-safe, .env-configured
 │
-└── hermes-graphify/          # Knowledge graph (requires: pip install graphifyy)
-    ├── plugin.yaml           # Hermes plugin manifest
-    └── __init__.py           # _GraphEngine, dependency graph queries
-                              # Thread-safe, .env-configured
-
-└── hermes-tps/               # t/s status bar (stdlib only)
-    ├── plugin.yaml           # Hermes plugin manifest
-    └── __init__.py           # post_api_request hook + HermesCLI monkey-patch
-                              # Thread-safe, no deps
+├── hermes-graphify/          # Knowledge graph (requires: pip install graphifyy)
+│   ├── plugin.yaml           # Hermes plugin manifest
+│   └── __init__.py           # _GraphEngine, dependency graph queries, JIT auto-build, auto-.gitignore
+│                              # Thread-safe, .env-configured
+│
+├── hermes-tps/               # t/s status bar (stdlib only)
+│   ├── plugin.yaml           # Hermes plugin manifest
+│   └── __init__.py           # post_api_request hook + HermesCLI monkey-patch
+│                              # Thread-safe, no deps
+│
+└── _shared/                  # Shared dependency management
+    └── deps.py               # JIT dep installer — auto-installs semble/graphifyy on first use
 ```
 
 ### Thread Safety Architecture
@@ -353,7 +369,7 @@ All shared state is protected by dedicated locks. No lock ordering deadlocks —
 
 ### Environment Variable Configuration
 
-Every timeout, limit, and interval is configurable via environment variables with sensible defaults. **30+ environment variables** across all four plugins:
+Every timeout, limit, and interval is configurable via environment variables with sensible defaults. **39 environment variables** across all five plugins:
 
 ```bash
 # ── LSP timeouts ──────────────────────────────────────────
@@ -422,13 +438,16 @@ HERMES_GRAPHIFY_MAX_FILE_SIZE=104857600 # Max graph file size (100MB)
 | **Idle client eviction** | ✓ | ✗ | ✗ |
 | **Thread safety** | ✓ (dedicated locks) | ✗ (single-threaded) | N/A |
 | **Timeouts on all I/O** | ✓ (configurable) | Partial | ✓ |
-| **Environment variable config** | ✓ (30+ vars) | ✗ (hardcoded) | ✗ |
+| **Environment variable config** | ✓ (39 vars) | ✗ (hardcoded) | ✗ |
 | **Zero external deps (LSP + EE)** | ✓ (stdlib only) | ✗ (Effect-ts, AI SDK) | ✗ (bundled) |
 | **Agent-agnostic** | ✓ (Hermes, OpenCode, Cline) | ✗ (OpenCode only) | ✗ (Claude Code only) |
 | **Survives updates** | ✓ (user plugin dir) | ✗ (monorepo) | ✗ (bundled) |
 | **Languages** | 14 | ~10 | ~10 |
 | **Semantic code search** | ✓ (Semble) | ✗ | ✗ |
 | **Knowledge graph** | ✓ (Graphify) | ✗ | ✗ |
+| **Auto-.gitignore** | ✓ (graphify-out/ on build) | ✗ | ✗ |
+| **JIT auto-build graph** | ✓ (builds on first use) | ✗ | ✗ |
+| **t/s status bar** | ✓ (Hermes TUI) | ✗ | ✗ |
 
 ## 📄 License
 
