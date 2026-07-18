@@ -1,0 +1,5 @@
+name: hermes-searxng
+version: 1.0.0
+description: "Metasearch engine — query 170+ search providers through a single native plugin. No Docker. Privacy-first."
+author: Hermes Agent
+license: MIT

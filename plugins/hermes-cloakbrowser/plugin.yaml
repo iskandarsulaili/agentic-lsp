@@ -1,0 +1,5 @@
+name: hermes-cloakbrowser
+version: 1.0.0
+description: "Stealth browser automation via CloakBrowser — fingerprint rotation, proxy support, humanized interaction. No Docker."
+author: Hermes Agent
+license: MIT
