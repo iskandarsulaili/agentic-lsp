@@ -324,18 +324,29 @@ class _SembleEngine:
         """Force reindex — evicts cache and rebuilds."""
         cache_key = str(Path(path).resolve())
 
-        # Clear disk cache
+        # Clear disk cache (best-effort, outside lock — safe)
         try:
             clear_cache(cache_key)
         except Exception:
             pass
 
-        # Evict in-memory cache
+        # Evict in-memory cache and rebuild under lock to prevent races
         with self._lock:
             self._indexes.pop(cache_key, None)
-
-        # Rebuild
-        return self.stats(path)
+            # Rebuild under the same lock — acquire model lock first if needed
+            model_path = self._ensure_model()
+            index = SembleIndex.from_path(path, model_path=model_path)
+            self._indexes[cache_key] = index
+            try:
+                save_index_to_cache(index, cache_key)
+            except Exception:
+                pass
+            s = index.stats
+            return {
+                "indexed_files": s.indexed_files,
+                "total_chunks": s.total_chunks,
+                "languages": dict(s.languages),
+            }
 
     def cached_repos(self) -> List[str]:
         """Return list of all cached repo paths (thread-safe)."""
@@ -345,6 +356,18 @@ class _SembleEngine:
     def available(self) -> bool:
         """Return True if Semble is importable."""
         return _SEMBLE_AVAILABLE
+
+    def status(self) -> Dict[str, Any]:
+        """Return engine status (thread-safe)."""
+        with self._lock:
+            return {
+                "available": _SEMBLE_AVAILABLE,
+                "model_loaded": self._model_loaded,
+                "cached_indexes": len(self._indexes),
+                "max_cache_size": _CACHE_MAX_SIZE,
+                "cached_repos": list(self._indexes.keys()),
+                "import_error": _SEMBLE_IMPORT_ERROR,
+            }
 
     def import_error(self) -> Optional[str]:
         """Return the import error message if Semble is not available."""
@@ -361,6 +384,8 @@ _engine = _SembleEngine()
 
 _auto_indexed: set[str] = set()  # set of project dirs that have been auto-indexed
 _auto_index_lock = threading.Lock()
+_indexing_in_progress: set[str] = set()  # dirs currently being indexed by a background thread
+_indexing_in_progress_lock = threading.Lock()
 
 # Debounced auto-reindex after file writes
 _reindex_debounce_timers: dict[str, threading.Timer] = {}  # cwd -> Timer
@@ -462,13 +487,32 @@ def _on_session_start(session_id: str = "", platform: str = "", **kwargs) -> Non
         if cwd in _auto_indexed:
             return
         _auto_indexed.add(cwd)
+
+    # Guard: don't start a second background thread for the same repo
+    with _indexing_in_progress_lock:
+        if repo_root in _indexing_in_progress:
+            logger.info("Index already in progress for %s", repo_root)
+            return
+        _indexing_in_progress.add(repo_root)
+
     # Start indexing in background so the session is not blocked for 30-90s
     logger.info("Auto-indexing %s on session start (background)", repo_root)
     t = threading.Thread(
-        target=lambda: _engine.get_index(repo_root),
+        target=lambda: _index_and_cleanup(repo_root),
         daemon=True,
     )
     t.start()
+
+
+def _index_and_cleanup(repo_root: str) -> None:
+    """Index a repo, then remove it from the in-progress set."""
+    try:
+        _engine.get_index(repo_root)
+    except Exception as exc:
+        logger.warning("Auto-index failed for %s: %s", repo_root, exc)
+    finally:
+        with _indexing_in_progress_lock:
+            _indexing_in_progress.discard(repo_root)
 
 
 def _on_session_reset(**kwargs) -> None:
@@ -490,7 +534,7 @@ def _on_post_tool_call(tool_name: str = "", args: dict | None = None, **kwargs) 
 
     def _do_reindex():
         with _reindex_debounce_lock:
-            _reindex_debounce_timers.pop(cwd, None)
+            _reindex_debounce_timers.pop(repo_root, None)
         # Reindex OUTSIDE the lock so other tool calls can schedule new timers
         try:
             logger.info("Detected file changes — reindexing %s", repo_root)
@@ -499,25 +543,26 @@ def _on_post_tool_call(tool_name: str = "", args: dict | None = None, **kwargs) 
             logger.warning("Auto-reindex failed: %s", exc)
     
     with _reindex_debounce_lock:
-        existing = _reindex_debounce_timers.pop(cwd, None)
+        existing = _reindex_debounce_timers.pop(repo_root, None)
         if existing is not None:
             existing.cancel()
         timer = threading.Timer(_REINDEX_DEBOUNCE_S, _do_reindex)
         timer.daemon = True
-        _reindex_debounce_timers[cwd] = timer
+        _reindex_debounce_timers[repo_root] = timer
         timer.start()
 
 
 def _on_session_end(**kwargs) -> None:
-    """Hook: clean up debounce timer and auto-index guard for current cwd."""
+    """Hook: clean up all debounce timers and auto-index guards for this session."""
     if not _engine.available():
         return
     cwd = os.getcwd()
+    # Cancel ALL pending debounce timers (not just current cwd — user may have cd'd)
     with _reindex_debounce_lock:
-        timer = _reindex_debounce_timers.pop(cwd, None)
-        if timer is not None:
+        for _cwd, timer in list(_reindex_debounce_timers.items()):
             timer.cancel()
-    # Clear the auto-index guard so a future session in this dir re-checks staleness
+        _reindex_debounce_timers.clear()
+    # Clear the auto-index guard so a future session re-checks staleness
     with _auto_index_lock:
         _auto_indexed.discard(cwd)
 
@@ -569,7 +614,7 @@ def _handle_semble_search(args: dict, **kwargs: Any) -> str:
     if not _engine.available():
         return json.dumps({"success": False, "error": _engine.import_error()})
 
-    query = args.get("query", "")
+    query = (args.get("query", "") or "").strip()
     repo = _resolve_repo(args.get("repo", ""))
     top_k = max(1, min(args.get("top_k", _DEFAULT_TOP_K), 50))
     max_snippet_lines = args.get("max_snippet_lines", _DEFAULT_MAX_SNIPPET_LINES)
@@ -677,19 +722,7 @@ def _handle_semble_reindex(args: dict, **kwargs: Any) -> str:
 def _handle_semble_status(args: dict, **kwargs: Any) -> str:
     """Handle semble_status tool — check if Semble is available and report engine state."""
     try:
-        available = _engine.available()
-        with _engine._lock:
-            model_loaded = _engine._model_loaded if available else False
-            cached_indexes = len(_engine._indexes) if available else 0
-        info = {
-            "available": available,
-            "model_loaded": model_loaded,
-            "cached_indexes": cached_indexes,
-            "max_cache_size": _CACHE_MAX_SIZE,
-            "cached_repos": _engine.cached_repos() if available else [],
-        }
-        if not available:
-            info["import_error"] = _engine.import_error()
+        info = _engine.status()
         return json.dumps({"success": True, **info})
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)})
