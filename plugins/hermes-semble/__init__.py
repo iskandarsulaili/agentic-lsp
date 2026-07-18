@@ -77,7 +77,6 @@ try:
     from semble import SembleIndex
     from semble.cache import find_index_from_cache_folder, save_index_to_cache, clear_cache
     from semble.index.dense import load_model
-    from semble.types import ContentType
     from semble.utils import resolve_chunk
 
     _SEMBLE_AVAILABLE = True
@@ -593,8 +592,13 @@ def _on_session_end(**kwargs) -> None:
         cwd = None
     # Cancel ALL pending debounce timers (not just current cwd — user may have cd'd)
     with _reindex_debounce_lock:
-        for _cwd, timer in list(_reindex_debounce_timers.items()):
+        for timer in list(_reindex_debounce_timers.values()):
             timer.cancel()
+            # If the timer already fired, signal its cancelled Event so the
+            # closure skips the reindex instead of running after session end.
+            old_cancelled = getattr(timer, '_cancelled', None)
+            if old_cancelled is not None:
+                old_cancelled.set()
         _reindex_debounce_timers.clear()
     # Clear the auto-index guard so a future session re-checks staleness
     if cwd is not None:
