@@ -228,7 +228,7 @@ class _SearxngEngine:
                 # Extract results
                 result_container = search.result_container
                 results = []
-                for r in result_container.get_ordered():
+                for r in result_container.get_ordered_results():
                     results.append({
                         "url": r.get("url", ""),
                         "title": r.get("title", ""),
@@ -246,8 +246,8 @@ class _SearxngEngine:
                     "results": results,
                     "engines_used": list(result_container.engines),
                     "suggestions": list(result_container.suggestions),
-                    "answers": list(result_container.answers),
-                    "infoboxes": [i.to_dict() if hasattr(i, "to_dict") else str(i) for i in result_container.infoboxes],
+                    "answers": [str(a) for a in result_container.answers],
+                    "infoboxes": [str(i) for i in result_container.infoboxes],
                     "number_of_results": result_container.number_of_results,
                     "paging": result_container.paging if hasattr(result_container, "paging") else False,
                 }

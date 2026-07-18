@@ -213,8 +213,8 @@ const {{ chromium }} = require('playwright-core');
 
         if self._ws_conn:
             try:
-                # Quick health check — send a simple CDP command
-                self._send_cdp("Browser.getVersion")
+                # Quick health check — try a ping (not a full CDP command)
+                self._ws_conn.ping()
                 return self._ws_conn
             except Exception:
                 # Connection died, reconnect
