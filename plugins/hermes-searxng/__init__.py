@@ -342,11 +342,11 @@ def _handle_searxng_search(args: dict, **kwargs: Any) -> str:
         query=query,
         categories=args.get("categories"),
         lang=args.get("lang", "en-US"),
-        safesearch=int(args.get("safesearch", 0)),
-        pageno=int(args.get("pageno", 1)),
+        safesearch=max(0, min(int(args.get("safesearch", 0)), 2)),
+        pageno=max(1, min(int(args.get("pageno", 1)), 100)),
         time_range=args.get("time_range"),
         engines=args.get("engines"),
-        max_results=int(args.get("max_results", 20)),
+        max_results=min(int(args.get("max_results", 20)), 50),
     )
     return json.dumps(result, default=str)
 

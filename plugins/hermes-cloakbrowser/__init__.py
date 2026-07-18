@@ -353,7 +353,7 @@ def _handle_cloakbrowser_navigate(args: dict, **kwargs: Any) -> str:
         }, session_id=session_id)
 
         # Wait for page load
-        timeout = int(args.get("timeout", _DEFAULT_TIMEOUT))
+        timeout = max(5, min(int(args.get("timeout", _DEFAULT_TIMEOUT)), 300))
         _cdp_send("Page.loadEventFired", {"timeout": timeout * 1000}, session_id=session_id)
 
         # Get page title
@@ -441,7 +441,7 @@ def _handle_cloakbrowser_html(args: dict, **kwargs: Any) -> str:
         }, session_id=session_id)
 
         html = result.get("result", {}).get("value", "")
-        max_chars = int(args.get("max_chars", 50000))
+        max_chars = max(1000, min(int(args.get("max_chars", 50000)), 500000))
 
         return json.dumps({
             "html": html[:max_chars],
