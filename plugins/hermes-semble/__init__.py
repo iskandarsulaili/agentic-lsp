@@ -208,14 +208,20 @@ class _SembleEngine:
             try:
                 # Wrap indexing with timeout to prevent hangs
                 result: List[Any] = []
+                error: List[Exception] = []
 
                 def _build() -> None:
-                    index = SembleIndex.from_path(path, model_path=model_path)
-                    result.append(index)
+                    try:
+                        index = SembleIndex.from_path(path, model_path=model_path)
+                        result.append(index)
+                    except Exception as e:
+                        error.append(e)
 
                 t = threading.Thread(target=_build, daemon=True)
                 t.start()
                 t.join(timeout=_INDEX_TIMEOUT)
+                if error:
+                    raise error[0]
                 if not result:
                     raise TimeoutError(
                         f"Indexing timed out after {_INDEX_TIMEOUT}s for {path}. "

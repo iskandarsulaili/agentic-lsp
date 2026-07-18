@@ -73,6 +73,7 @@ info "Installing Python dependencies..."
 DEPS=(
     "graphifyy>=0.9.15"
     "tree-sitter"
+    "semble>=0.3.0"
 )
 for dep in "${DEPS[@]}"; do
     echo -n "  $dep ... "
@@ -98,7 +99,45 @@ for plugin in hermes-graphify hermes-semble hermes-lsp hermes-effect-engine herm
     fi
 done
 
-# ── Step 6: Check plugin usage tracking in Hermes core ─────────────
+# ── Step 6: Patch semble file_walker for PermissionError handling ──
+info "Patching semble file_walker to handle PermissionError..."
+SEMBLE_WALKER="$("$PYTHON" -c "import semble.index.file_walker; print(semble.index.file_walker.__file__)" 2>/dev/null || true)"
+if [ -n "$SEMBLE_WALKER" ] && [ -f "$SEMBLE_WALKER" ]; then
+    # P1: Wrap _load_ignore_for_dir in try/except PermissionError
+    if grep -q 'def _load_ignore_for_dir' "$SEMBLE_WALKER"; then
+        # Check if already patched
+        if grep -q 'except PermissionError' "$SEMBLE_WALKER" 2>/dev/null; then
+            echo "  ✓ already patched"
+        else
+            # Apply both patches using python to be safe
+            "$PYTHON" -c "
+import re
+with open('$SEMBLE_WALKER') as f:
+    src = f.read()
+
+# Patch 1: _load_ignore_for_dir — wrap entire body in try/except
+src = src.replace(
+    'def _load_ignore_for_dir(directory: Path) -> GitIgnoreSpec | None:\n    \"\"\"Loads a gitignore and sembleignore for a dir.\"\"\"\n    gitignore = directory / \".gitignore\"\n    sembleignore = directory / \".sembleignore\"\n\n    lines = []\n    if gitignore.is_file():\n        lines.extend(gitignore.read_text(encoding=\"utf-8\", errors=\"ignore\").splitlines())\n    if sembleignore.is_file():\n        lines.extend(sembleignore.read_text(encoding=\"utf-8\", errors=\"ignore\").splitlines())\n    if lines:\n        return GitIgnoreSpec.from_lines(lines)\n    return None',
+    'def _load_ignore_for_dir(directory: Path) -> GitIgnoreSpec | None:\n    \"\"\"Loads a gitignore and sembleignore for a dir.\"\"\"\n    try:\n        gitignore = directory / \".gitignore\"\n        sembleignore = directory / \".sembleignore\"\n\n        lines = []\n        if gitignore.is_file():\n            lines.extend(gitignore.read_text(encoding=\"utf-8\", errors=\"ignore\").splitlines())\n        if sembleignore.is_file():\n            lines.extend(sembleignore.read_text(encoding=\"utf-8\", errors=\"ignore\").splitlines())\n        if lines:\n            return GitIgnoreSpec.from_lines(lines)\n    except PermissionError:\n        pass\n    return None'
+)
+
+# Patch 2: _walk — wrap iterdir() in try/except PermissionError
+src = src.replace(
+    '    for item in sorted(directory.iterdir()):',
+    '    try:\n        entries = sorted(directory.iterdir())\n    except PermissionError:\n        return\n\n    for item in entries:'
+)
+
+with open('$SEMBLE_WALKER', 'w') as f:
+    f.write(src)
+print('  ✓ patched')
+" 2>&1
+        fi
+    fi
+else
+    warn "  Could not find semble.file_walker — skipping patch. Install semble first."
+fi
+
+# ── Step 7: Check plugin usage tracking in Hermes core ─────────────
 CORE_PLUGIN_USAGE="$HOME/.hermes/hermes-agent/tools/plugin_usage.py"
 if [ -f "$CORE_PLUGIN_USAGE" ]; then
     echo "  ✓ plugin_usage.py exists (core tracking)"
