@@ -182,6 +182,8 @@ class _SembleEngine:
         Cached indexes are evicted LRU when ``_CACHE_MAX_SIZE`` is exceeded.
         Indexing is wrapped with a timeout to prevent hangs on very large repos.
         Model loading happens outside the lock so it doesn't block other cache lookups.
+        The main lock is released during the build wait so concurrent operations
+        (searches on already-cached repos, status checks) are not blocked.
         """
         cache_key = str(Path(path).resolve())
 
@@ -205,48 +207,50 @@ class _SembleEngine:
             self._evict_lru()
 
             logger.info("Indexing: %s", path)
-            try:
-                # Wrap indexing with timeout to prevent hangs
-                result: List[Any] = []
-                error: List[Exception] = []
+            # Build in a daemon thread so we can enforce a timeout
+            result: List[Any] = []
+            error: List[Exception] = []
 
-                def _build() -> None:
-                    try:
-                        index = SembleIndex.from_path(path, model_path=model_path)
-                        result.append(index)
-                    except Exception as e:
-                        error.append(e)
-
-                t = threading.Thread(target=_build, daemon=True)
-                t.start()
-                t.join(timeout=_INDEX_TIMEOUT)
-                if error:
-                    raise error[0]
-                if not result:
-                    raise TimeoutError(
-                        f"Indexing timed out after {_INDEX_TIMEOUT}s for {path}. "
-                        "Increase HERMES_SEMBLE_INDEX_TIMEOUT or exclude large directories."
-                    )
-
-                index = result[0]
-                self._indexes[cache_key] = index
-
-                # Save to disk cache for fast reload across sessions
+            def _build() -> None:
                 try:
-                    save_index_to_cache(index, cache_key)
-                except Exception:
-                    pass
+                    index = SembleIndex.from_path(path, model_path=model_path)
+                    result.append(index)
+                except Exception as e:
+                    error.append(e)
 
-                logger.info(
-                    "Indexed %s: %d files, %d chunks",
-                    path,
-                    index.stats.indexed_files,
-                    index.stats.total_chunks,
-                )
-                return index
-            except Exception as e:
-                logger.error("Failed to index %s: %s", path, e)
-                raise
+            t = threading.Thread(target=_build, daemon=True)
+            t.start()
+
+        # Release the lock WHILE waiting for the build to complete.
+        # This prevents blocking concurrent searches on OTHER cached repos.
+        # A second thread may also start building the same path during this
+        # window — the result is redundant work, not data corruption.
+        t.join(timeout=_INDEX_TIMEOUT)
+
+        if error:
+            raise error[0]
+        if not result:
+            raise TimeoutError(
+                f"Indexing timed out after {_INDEX_TIMEOUT}s for {path}. "
+                "Increase HERMES_SEMBLE_INDEX_TIMEOUT or exclude large directories."
+            )
+
+        index = result[0]
+
+        with self._lock:
+            self._indexes[cache_key] = index
+            try:
+                save_index_to_cache(index, cache_key)
+            except Exception:
+                pass
+
+        logger.info(
+            "Indexed %s: %d files, %d chunks",
+            path,
+            index.stats.indexed_files,
+            index.stats.total_chunks,
+        )
+        return index
 
     def search(
         self,
@@ -465,7 +469,11 @@ def _on_session_start(session_id: str = "", platform: str = "", **kwargs) -> Non
         return
     if platform and platform not in ("cli", "tui", ""):
         return
-    cwd = os.getcwd()
+    try:
+        cwd = os.getcwd()
+    except FileNotFoundError:
+        logger.warning("Current directory no longer exists — skipping auto-index")
+        return
     # Resolve to the nearest git repo root — only auto-index real projects.
     repo_root = _find_git_root(cwd)
     if repo_root is None:
@@ -521,8 +529,12 @@ def _on_session_reset(**kwargs) -> None:
     """Hook: allow re-index on session reset (/new)."""
     if not _engine.available():
         return
+    try:
+        cwd = os.getcwd()
+    except FileNotFoundError:
+        return
     with _auto_index_lock:
-        _auto_indexed.discard(os.getcwd())
+        _auto_indexed.discard(cwd)
 
 
 def _on_post_tool_call(tool_name: str = "", args: dict | None = None, **kwargs) -> None:
@@ -531,7 +543,10 @@ def _on_post_tool_call(tool_name: str = "", args: dict | None = None, **kwargs) 
         return
     if not _tool_is_writing(tool_name, args):
         return
-    cwd = os.getcwd()
+    try:
+        cwd = os.getcwd()
+    except FileNotFoundError:
+        return
     repo_root = _find_git_root(cwd) or cwd
 
     # Each timer gets its own sentinel — if the timer is superseded by a newer
@@ -572,15 +587,19 @@ def _on_session_end(**kwargs) -> None:
     """Hook: clean up all debounce timers and auto-index guards for this session."""
     if not _engine.available():
         return
-    cwd = os.getcwd()
+    try:
+        cwd = os.getcwd()
+    except FileNotFoundError:
+        cwd = None
     # Cancel ALL pending debounce timers (not just current cwd — user may have cd'd)
     with _reindex_debounce_lock:
         for _cwd, timer in list(_reindex_debounce_timers.items()):
             timer.cancel()
         _reindex_debounce_timers.clear()
     # Clear the auto-index guard so a future session re-checks staleness
-    with _auto_index_lock:
-        _auto_indexed.discard(cwd)
+    if cwd is not None:
+        with _auto_index_lock:
+            _auto_indexed.discard(cwd)
 
 
 def _tool_is_writing(tool_name: str, args: dict | None) -> bool:
@@ -616,7 +635,10 @@ def _resolve_repo(repo: str) -> str:
     Uses os.getcwd() at runtime so it follows directory changes mid-session.
     """
     if not repo or repo.strip() == "":
-        return os.getcwd()
+        try:
+            return os.getcwd()
+        except FileNotFoundError:
+            return os.path.expanduser("~")
     return repo.strip()
 
 
