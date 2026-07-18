@@ -1,14 +1,15 @@
 # Plugin Usage Instructions
 
-You have 7 plugins installed with 33 tools. Use them actively in every task.
+You have 8 plugins with 44 tools available. Use them actively in every task.
 
 ## Workflow Priority
 
-1. **SearXNG** (`searxng_search`) — use INSTEAD of `web_search` for ALL web queries. 170+ engines, privacy-first, faster.
-2. **Semble** (`semble_search`, `semble_find_related`) — find files by concept before reading them
-3. **Graphify** (`graphify_query`, `graphify_path`, `graphify_explain`) — understand how code connects
-4. **CloakBrowser** (`cloakbrowser_navigate`, `cloakbrowser_screenshot`) — for JS-rendered pages that need a real browser
-5. **LSP** (`lsp_verify`, `lsp_auto_fix`) — verify after every edit, never ship broken code
+1. **Orchestra** (`orchestra_propose`, `orchestra_plan`, `orchestra_track`, `orchestra_ready`, `orchestra_claim`) — spec-driven development first: define proposals, expand into artifact DAGs, create tracked work items
+2. **SearXNG** (`searxng_search`) — then search the web for research. Use INSTEAD of `web_search` for ALL web queries.
+3. **Semble** (`semble_search`, `semble_find_related`) — then find code files by concept
+4. **Graphify** (`graphify_query`, `graphify_path`, `graphify_explain`) — understand how code connects
+5. **CloakBrowser** (`cloakbrowser_navigate`, `cloakbrowser_screenshot`) — for JS-rendered pages
+6. **LSP** (`lsp_verify`, `lsp_auto_fix`) — verify after every edit
 
 ## Mandatory Rules
 
@@ -24,6 +25,16 @@ You have 7 plugins installed with 33 tools. Use them actively in every task.
 
 | When | What to call |
 |------|-------------|
+| "Start a new project" | `orchestra_init(proposal="...", overview="...")` |
+| "Create a proposal" | `orchestra_propose(name="...", overview="...", requirements=[...])` |
+| "Plan the work" | `orchestra_plan(proposal="...")` — expands into artifact DAG + issues |
+| "Create a task" | `orchestra_track(title="...", type="task", priority=2)` |
+| "What's ready to work on?" | `orchestra_ready()` — finds unblocked issues |
+| "Claim this task" | `orchestra_claim(issue_id="iss-001", agent_id="default")` |
+| "Update status" | `orchestra_update(issue_id="iss-001", status="in_progress")` |
+| "Validate a spec" | `orchestra_validate(spec="proposal-name")` |
+| "Archive a change" | `orchestra_archive(change="my-feature")` |
+| "Sync with GitHub" | `orchestra_sync(direction="push", repo="owner/name", issue_id="iss-001")` |
 | Search the web | `searxng_search(query="...", categories=["general"])` |
 | List what engines are available | `searxng_engines(category="images")` |
 | "Find code that does X" | `semble_search(query="...", repo=...)` |
@@ -51,12 +62,29 @@ SearXNG auto-detects the `searxng-src` checkout. Set `HERMES_SEARXNG_SRC` if it'
 
 Re-launches if closed. Fingerprint seed and proxy are configurable per launch.
 
+## Orchestra — Spec-Driven Development & Tracking
+
+Orchestra combines OpenSpec's artifact DAG with Beads' issue tracking.
+
+**Workflow:**
+1. `orchestra_init` — initialize workspace (creates `.hermes/orchestra/`)
+2. `orchestra_propose` — create a proposal spec + epic issue
+3. `orchestra_plan` — expand into artifact DAG (proposal→specs→design→tasks), creates issues for each
+4. `orchestra_ready` — find issues ready to work on (all deps met)
+5. `orchestra_claim` — claim an issue (5-min lease, renewable via heartbeat)
+6. `orchestra_update` — transition status or add delta requirements
+7. `orchestra_validate` — validate spec before closing
+8. `orchestra_archive` — merge change deltas into main specs
+9. `orchestra_sync` — push/pull with GitHub Issues
+
+All state stored in `.hermes/orchestra/` — JSON files, no external DB.
+
 ## Graphify Auto-Build
 
 If graph.json doesn't exist, the first graphify call auto-builds it. Just call the tool. On success, `graphify-out/` is auto-added to `.gitignore`.
 
 ## Troubleshooting
 
-- Plugin toolsets should show: `effect`, `graphify`, `lsp`, `searxng`, `cloakbrowser`, `semble`
+- Plugin toolsets should show: `effect`, `graphify`, `lsp`, `searxng`, `cloakbrowser`, `semble`, `orchestra`
 - Enable with: `hermes plugins enable <name>` (NOT `hermes config set`)
 - After enabling, restart Hermes
