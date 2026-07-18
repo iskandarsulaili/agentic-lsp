@@ -50,7 +50,7 @@ fi
 info "Installing plugins to $PLUGIN_DIR"
 mkdir -p "$PLUGIN_DIR"
 
-for plugin in hermes-graphify hermes-semble hermes-lsp hermes-effect-engine hermes-tps _shared; do
+for plugin in hermes-graphify hermes-semble hermes-lsp hermes-effect-engine hermes-tps hermes-orchestra hermes-searxng hermes-cloakbrowser _shared; do
     src="$REPO_DIR/plugins/$plugin"
     dst="$PLUGIN_DIR/$plugin"
     if [ -d "$src" ]; then
@@ -77,7 +77,9 @@ DEPS=(
 )
 for dep in "${DEPS[@]}"; do
     echo -n "  $dep ... "
-    if "$PYTHON" -c "import $(echo $dep | cut -d'[' -f1 | cut -d'>' -f1 | cut -d'=' -f1 | tr -d ' ') 2>/dev/null" 2>/dev/null; then
+    # Map pip package name to importable module name (tree-sitter vs tree_sitter)
+    mod=$(echo "$dep" | cut -d'[' -f1 | cut -d'>' -f1 | cut -d'=' -f1 | tr -d ' ' | tr '-' '_')
+    if "$PYTHON" -c "import $mod" 2>/dev/null; then
         echo "already installed"
     else
         "$PYTHON" -m pip install "$dep" 2>&1 | tail -1
@@ -86,7 +88,7 @@ done
 
 # ── Step 5: Verify plugins load ────────────────────────────────────
 info "Verifying plugin imports..."
-for plugin in hermes-graphify hermes-semble hermes-lsp hermes-effect-engine hermes-tps; do
+for plugin in hermes-graphify hermes-semble hermes-lsp hermes-effect-engine hermes-tps hermes-orchestra hermes-searxng hermes-cloakbrowser; do
     init="$PLUGIN_DIR/$plugin/__init__.py"
     if [ -f "$init" ]; then
         if "$PYTHON" -c "import py_compile; py_compile.compile('$init', doraise=True)" 2>/dev/null; then

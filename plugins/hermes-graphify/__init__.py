@@ -88,9 +88,13 @@ _auto_build_started: set[str] = set()  # set of project dirs that have been chec
 _auto_build_lock = threading.Lock()
 
 # Debounced auto-update after file writes
-_update_debounce_timers: dict[str, threading.Timer] = {}  # cwd -> Timer
+_update_debounce_timers: dict[str, threading.Timer] = {}  # repo_root -> Timer
 _update_debounce_lock = threading.Lock()
-_UPDATE_DEBOUNCE_S = 5.0  # seconds to wait after last write before updating
+_UPDATE_DEBOUNCE_S = 5.0
+
+# Guard: prevent concurrent background builds for the same repo
+_building_in_progress: set[str] = set()
+_building_in_progress_lock = threading.Lock()  # seconds to wait after last write before updating
 
 # File extensions to track for staleness checking
 _SOURCE_EXTENSIONS = frozenset({
@@ -849,6 +853,22 @@ def _source_files_changed_since(project_dir: str, since_mtime: float) -> bool:
     return False
 
 
+def _find_git_root(path: str) -> str | None:
+    """Walk up from *path* looking for a .git directory."""
+    try:
+        current = Path(path).resolve()
+        for _ in range(10):
+            if (current / ".git").exists():
+                return str(current)
+            parent = current.parent
+            if parent == current:
+                break
+            current = parent
+    except (OSError, PermissionError):
+        pass
+    return None
+
+
 def _check_and_auto_build(cwd: str | None = None) -> str | None:
     """Called at session start: auto-build if missing, auto-update if stale.
 
@@ -893,16 +913,39 @@ def _on_session_start(session_id: str = "", platform: str = "", **kwargs) -> Non
     if platform and platform not in ("cli", "tui", ""):
         return
 
-    cwd = os.getcwd()
+    try:
+        cwd = os.getcwd()
+    except FileNotFoundError:
+        logger.warning("Current directory no longer exists - skipping auto-build")
+        return
+
+    # Resolve to the nearest git repo root
+    repo_root = _find_git_root(cwd)
+    if repo_root is None:
+        logger.info("Skipping auto-build for %s (not inside a git repo)", cwd)
+        with _auto_build_lock:
+            _auto_build_started.add(cwd)
+        return
+
     with _auto_build_lock:
         if cwd in _auto_build_started:
             return
         _auto_build_started.add(cwd)
 
+    # Guard: don't start a second background build for the same repo
+    with _building_in_progress_lock:
+        if repo_root in _building_in_progress:
+            logger.info("Build already in progress for %s", repo_root)
+            return
+        _building_in_progress.add(repo_root)
+
     try:
         _check_and_auto_build(cwd)
     except Exception as exc:
         logger.warning("Auto-build on session start failed: %s", exc)
+    finally:
+        with _building_in_progress_lock:
+            _building_in_progress.discard(repo_root)
 
 
 def _on_session_reset(session_id: str = "", platform: str = "", **kwargs) -> None:
@@ -916,9 +959,13 @@ def _on_session_reset(session_id: str = "", platform: str = "", **kwargs) -> Non
     # In gateway mode there's no meaningful project directory — skip.
     if platform and platform not in ("cli", "tui", ""):
         return
+    try:
+        cwd = os.getcwd()
+    except FileNotFoundError:
+        return
     with _auto_build_lock:
         # Only clear the CURRENT dir so other directories keep their state
-        _auto_build_started.discard(os.getcwd())
+        _auto_build_started.discard(cwd)
 
 
 def _on_pre_llm_call(
@@ -1010,9 +1057,9 @@ def _on_pre_llm_call(
 def _on_post_tool_call(tool_name: str = "", args: dict | None = None, **kwargs) -> None:
     """Hook: detect file writes and schedule incremental graph update.
 
-    Debounced per-project-directory: waits _UPDATE_DEBOUNCE_S seconds
+    Debounced per-repo: waits _UPDATE_DEBOUNCE_S seconds
     after the last detected write before triggering the update.
-    Per-directory timers prevent two concurrent sessions (gateway mode,
+    Per-repo timers prevent two concurrent sessions (gateway mode,
     multiple users) from interfering with each other.
     """
     if not _GRAPHIFY_AVAILABLE:
@@ -1022,39 +1069,62 @@ def _on_post_tool_call(tool_name: str = "", args: dict | None = None, **kwargs) 
     if not _tool_is_writing(tool_name, args):
         return
 
-    cwd = os.getcwd()
+    try:
+        cwd = os.getcwd()
+    except FileNotFoundError:
+        return
 
-    # Debounce per directory: cancel any existing timer for this cwd
+    repo_root = _find_git_root(cwd) or cwd
+    cancelled = threading.Event()
+
+    def _do_update():
+        if cancelled.is_set():
+            return
+        with _update_debounce_lock:
+            if cancelled.is_set():
+                return
+            _update_debounce_timers.pop(repo_root, None)
+            current_graph = Path(repo_root) / "graphify-out" / "graph.json"
+            if not current_graph.exists():
+                return
+            logger.info("Detected file changes - auto-updating graph in %s", repo_root)
+            _start_background_build(str(current_graph), repo_root, update=True)
+
     with _update_debounce_lock:
-        existing = _update_debounce_timers.pop(cwd, None)
+        existing = _update_debounce_timers.pop(repo_root, None)
         if existing is not None:
             existing.cancel()
-
-        def _do_update():
-            """Fire the update, reading cwd from the closure."""
-            with _update_debounce_lock:
-                _update_debounce_timers.pop(cwd, None)
-                current_graph = Path(cwd) / "graphify-out" / "graph.json"
-                if not current_graph.exists():
-                    return
-                logger.info("Detected file changes — auto-updating graph in %s", cwd)
-                _start_background_build(str(current_graph), cwd, update=True)
+            old_cancelled = getattr(existing, '_cancelled', None)
+            if old_cancelled is not None:
+                old_cancelled.set()
 
         timer = threading.Timer(_UPDATE_DEBOUNCE_S, _do_update)
         timer.daemon = True
-        _update_debounce_timers[cwd] = timer
+        timer._cancelled = cancelled
+        _update_debounce_timers[repo_root] = timer
         timer.start()
 
 
 def _on_session_end(session_id: str = "", **kwargs) -> None:
-    """Hook: clean up debounce timer for current cwd on session end."""
+    """Hook: clean up all debounce timers for this session."""
     if not _GRAPHIFY_AVAILABLE:
         return
-    cwd = os.getcwd()
+    try:
+        cwd = os.getcwd()
+    except FileNotFoundError:
+        cwd = None
+    # Cancel ALL pending debounce timers (not just current cwd)
     with _update_debounce_lock:
-        timer = _update_debounce_timers.pop(cwd, None)
-        if timer is not None:
+        for timer in list(_update_debounce_timers.values()):
             timer.cancel()
+            old_cancelled = getattr(timer, '_cancelled', None)
+            if old_cancelled is not None:
+                old_cancelled.set()
+        _update_debounce_timers.clear()
+    # Clear the auto-build guard so a future session re-checks
+    if cwd is not None:
+        with _auto_build_lock:
+            _auto_build_started.discard(cwd)
 
 
 def _tool_is_writing(tool_name: str, args: dict | None) -> bool:
