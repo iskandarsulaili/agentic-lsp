@@ -159,9 +159,9 @@ class _SearxngEngine:
             # 4. Load engines
             try:
                 from searx.engines import load_engines
-                from searx.enginelib.traits import EngineTraitsMap
 
-                load_engines()
+                engine_list = self._searx.settings.get("engines", [])
+                load_engines(engine_list)
                 self._search_mod = __import__("searx.search", fromlist=["SearchWithPlugins", "SearchQuery"])
             except Exception as e:
                 self._error = f"SearXNG engine load failed: {e}"
@@ -203,7 +203,7 @@ class _SearxngEngine:
 
         with _SEARXNG_LOCK:
             try:
-                from searx.search import SearchWithPlugins, SearchQuery
+                from searx.search import Search, SearchQuery
                 from searx.search.models import EngineRef
 
                 # Build engine references from engines/categories params
@@ -230,7 +230,7 @@ class _SearxngEngine:
                 )
 
                 # Execute search
-                search = SearchWithPlugins(search_query)
+                search = Search(search_query)
                 search.search()
 
                 # Extract results
