@@ -534,8 +534,17 @@ def _on_post_tool_call(tool_name: str = "", args: dict | None = None, **kwargs) 
     cwd = os.getcwd()
     repo_root = _find_git_root(cwd) or cwd
 
+    # Each timer gets its own sentinel — if the timer is superseded by a newer
+    # write, the sentinel is set before the new timer starts. The old timer's
+    # closure checks this sentinel before proceeding.
+    cancelled = threading.Event()
+
     def _do_reindex():
+        if cancelled.is_set():
+            return
         with _reindex_debounce_lock:
+            if cancelled.is_set():
+                return
             _reindex_debounce_timers.pop(repo_root, None)
         # Reindex OUTSIDE the lock so other tool calls can schedule new timers
         try:
@@ -543,13 +552,18 @@ def _on_post_tool_call(tool_name: str = "", args: dict | None = None, **kwargs) 
             _engine.reindex(repo_root)
         except Exception as exc:
             logger.warning("Auto-reindex failed: %s", exc)
-    
+
     with _reindex_debounce_lock:
         existing = _reindex_debounce_timers.pop(repo_root, None)
         if existing is not None:
             existing.cancel()
+            # Signal the old timer's closure to skip if it already fired
+            old_cancelled = getattr(existing, '_cancelled', None)
+            if old_cancelled is not None:
+                old_cancelled.set()
         timer = threading.Timer(_REINDEX_DEBOUNCE_S, _do_reindex)
         timer.daemon = True
+        timer._cancelled = cancelled  # tag so we can signal it later if superseded
         _reindex_debounce_timers[repo_root] = timer
         timer.start()
 
