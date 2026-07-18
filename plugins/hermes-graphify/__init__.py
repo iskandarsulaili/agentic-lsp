@@ -1074,7 +1074,9 @@ def _on_post_tool_call(tool_name: str = "", args: dict | None = None, **kwargs) 
     except FileNotFoundError:
         return
 
-    repo_root = _find_git_root(cwd) or cwd
+    repo_root = _find_git_root(cwd)
+    if repo_root is None:
+        return
     cancelled = threading.Event()
 
     def _do_update():

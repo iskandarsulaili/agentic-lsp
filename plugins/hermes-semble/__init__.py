@@ -539,7 +539,9 @@ def _on_post_tool_call(tool_name: str = "", args: dict | None = None, **kwargs) 
         cwd = os.getcwd()
     except FileNotFoundError:
         return
-    repo_root = _find_git_root(cwd) or cwd
+    repo_root = _find_git_root(cwd)
+    if repo_root is None:
+        return
 
     # Each timer gets its own sentinel — if the timer is superseded by a newer
     # write, the sentinel is set before the new timer starts. The old timer's
