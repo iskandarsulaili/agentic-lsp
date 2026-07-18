@@ -116,12 +116,6 @@ _CACHE_MAX_SIZE = _env_int("HERMES_SEMBLE_CACHE_SIZE", 10)
 _DEFAULT_TOP_K = _env_int("HERMES_SEMBLE_TOP_K", 5)
 _DEFAULT_MAX_SNIPPET_LINES = _env_int("HERMES_SEMBLE_SNIPPET_LINES", 10)
 _INDEX_TIMEOUT = _env_float("HERMES_SEMBLE_INDEX_TIMEOUT", 120.0)  # max seconds to wait for indexing
-_HOME_DIR = Path.home()
-
-# Directories to skip when auto-indexing (too large, not a code project).
-# The home directory is skipped because indexing ~/ is slow (thousands of files)
-# and never useful for code search. Override with HERMES_SEMBLE_AUTO_INDEX_HOME=1.
-_AUTO_INDEX_HOME = _env_int("HERMES_SEMBLE_AUTO_INDEX_HOME", 0)
 
 
 class _SembleEngine:
@@ -383,14 +377,6 @@ _REINDEX_SKIP_DIRS = frozenset({
     ".tox", ".mypy_cache", ".pytest_cache", "dist", "build",
     ".hermes", ".eggs",
 })
-
-
-def _is_home_dir(path: str) -> bool:
-    """Check if a path is the user's home directory."""
-    try:
-        return Path(path).resolve() == _HOME_DIR
-    except (OSError, PermissionError):
-        return False
 
 
 def _find_git_root(path: str) -> str | None:
