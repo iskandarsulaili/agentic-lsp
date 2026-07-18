@@ -56,6 +56,21 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ───────────────────────────────────────────────────────────────
 ORCHESTRA_DIR = Path.home() / ".hermes" / "orchestra"
+
+
+def _sanitize_name(name: str) -> str:
+    """Sanitize a spec/change name for use as a filename.
+    Removes path separators, special chars, limits to safe chars.
+    """
+    # Remove path traversal
+    name = os.path.basename(os.path.normpath(name))
+    # Replace special chars with hyphens
+    name = re.sub(r"[^a-zA-Z0-9_.-]", "-", name)
+    # Collapse multiple hyphens
+    name = re.sub(r"-+", "-", name)
+    # Strip leading/trailing hyphens and dots
+    name = name.strip("-.")
+    return name or "unnamed"
 SPECS_DIR = ORCHESTRA_DIR / "specs"
 CHANGES_DIR = ORCHESTRA_DIR / "changes"
 ISSUES_DIR = ORCHESTRA_DIR / "issues"
@@ -840,7 +855,7 @@ def _handle_orchestra_init(args: dict, **kwargs: Any) -> str:
 
     _ensure_dirs()
     # Create default proposal spec
-    proposal_name = args.get("proposal", "untitled")
+    proposal_name = _sanitize_name(args.get("proposal", "untitled"))
     SpecEngine.create_spec(
         name=proposal_name,
         overview=args.get("overview", "Proposal placeholder"),
@@ -869,7 +884,7 @@ def _handle_orchestra_plan(args: dict, **kwargs: Any) -> str:
     if err:
         return json.dumps({"error": err})
 
-    proposal = args.get("proposal", "untitled")
+    proposal = _sanitize_name(args.get("proposal", "untitled"))
     artifacts = ArtifactDAG.default_schema()["artifacts"]
 
     # Create spec for each artifact
@@ -898,7 +913,7 @@ def _handle_orchestra_propose(args: dict, **kwargs: Any) -> str:
     if err:
         return json.dumps({"error": err})
 
-    name = args.get("name", f"proposal-{int(time.time())}")
+    name = _sanitize_name(args.get("name", f"proposal-{int(time.time())}"))
 
     # Create spec
     spec = SpecEngine.create_spec(
@@ -976,7 +991,7 @@ def _handle_orchestra_update(args: dict, **kwargs: Any) -> str:
 
     issue_id = args.get("issue_id", "")
     status = args.get("status", "")
-    change = args.get("change", "")
+    change = _sanitize_name(args.get("change", ""))
 
     if issue_id:
         fields = {}
@@ -1055,7 +1070,7 @@ def _handle_orchestra_archive(args: dict, **kwargs: Any) -> str:
     if err:
         return json.dumps({"error": err})
 
-    change = args.get("change", "")
+    change = _sanitize_name(args.get("change", ""))
     if not change:
         return json.dumps({"error": "change name required"})
 
