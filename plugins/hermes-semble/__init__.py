@@ -324,7 +324,11 @@ class _SembleEngine:
         """Force reindex — evicts cache and rebuilds."""
         cache_key = str(Path(path).resolve())
 
-        # Clear disk cache (best-effort, outside lock — safe)
+        # Ensure model is loaded FIRST (outside lock) — this can take 4-30s on
+        # first call and must not block concurrent searches.
+        model_path = self._ensure_model()
+
+        # Clear disk cache (best-effort, safe outside lock)
         try:
             clear_cache(cache_key)
         except Exception:
@@ -333,8 +337,6 @@ class _SembleEngine:
         # Evict in-memory cache and rebuild under lock to prevent races
         with self._lock:
             self._indexes.pop(cache_key, None)
-            # Rebuild under the same lock — acquire model lock first if needed
-            model_path = self._ensure_model()
             index = SembleIndex.from_path(path, model_path=model_path)
             self._indexes[cache_key] = index
             try:
@@ -388,7 +390,7 @@ _indexing_in_progress: set[str] = set()  # dirs currently being indexed by a bac
 _indexing_in_progress_lock = threading.Lock()
 
 # Debounced auto-reindex after file writes
-_reindex_debounce_timers: dict[str, threading.Timer] = {}  # cwd -> Timer
+_reindex_debounce_timers: dict[str, threading.Timer] = {}  # repo_root -> Timer
 _reindex_debounce_lock = threading.Lock()
 _REINDEX_DEBOUNCE_S = 10.0  # seconds to wait after last write before reindexing
 _REINDEX_SNIPPET_EXTENSIONS = frozenset({
