@@ -1,6 +1,6 @@
 # Plugin Usage Instructions
 
-You have 8 plugins with 45 tools available. Use them actively in every task.
+You have 7 plugins with 45 tools available. Use them actively in every task.
 
 ## Workflow Priority
 
