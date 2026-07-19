@@ -210,16 +210,18 @@ def _patch_cli_status_bar() -> None:
             if _speed:
                 parts.append(f"{_speed} t/s")
 
-            # Plugin call counts — always all 7 so user sees tracking is alive
+            # Plugin call counts — only active toolsets
             _usage = snapshot.get("plugin_usage", {})
-            if _usage is not None:
+            if _usage:
                 usage_parts = []
                 for ts in sorted(_TOOLSET_PREFIXES.values()):
                     cnt = _usage.get(ts, 0)
-                    emoji = _TOOLSET_EMOJI.get(ts, "?")
-                    label = _TOOLSET_LABEL.get(ts, ts)
-                    usage_parts.append(f"{emoji}{label}:{cnt}")
-                parts.append(" | ".join(usage_parts))
+                    if cnt > 0:
+                        emoji = _TOOLSET_EMOJI.get(ts, "?")
+                        label = _TOOLSET_LABEL.get(ts, ts)
+                        usage_parts.append(f"{emoji}{label}:{cnt}")
+                if usage_parts:
+                    parts.append(" | ".join(usage_parts))
 
             parts.append(duration_label)
 
@@ -277,25 +279,22 @@ def _patch_cli_status_bar() -> None:
                 frags.append(("class:status-bar-dim", " \u2502 "))
                 frags.append(("class:status-bar-strong", f"{_speed} t/s"))
 
-            # Plugin usage — always all 7 so user sees tracking is alive
+            # Plugin usage — only active toolsets
             _usage = snapshot.get("plugin_usage", {})
-            if _usage is not None:
+            if _usage:
                 active = []
                 for ts in sorted(_TOOLSET_PREFIXES.values()):
                     cnt = _usage.get(ts, 0)
-                    emoji = _TOOLSET_EMOJI.get(ts, "?")
-                    label = _TOOLSET_LABEL.get(ts, ts)
-                    txt = f"{emoji}{label}:{cnt}"
                     if cnt > 0:
-                        active.append(("class:status-bar-strong", txt))
-                    else:
-                        active.append(("class:status-bar-dim", txt))
+                        emoji = _TOOLSET_EMOJI.get(ts, "?")
+                        label = _TOOLSET_LABEL.get(ts, ts)
+                        active.append((f"{emoji}{label}:{cnt}", cnt))
                 if active:
                     frags.append(("class:status-bar-dim", " \u2502 "))
-                    for i, (style, txt) in enumerate(active):
+                    for i, (txt, _) in enumerate(active):
                         if i > 0:
                             frags.append(("class:status-bar-dim", " "))
-                        frags.append((style, txt))
+                        frags.append(("class:status-bar-strong", txt))
 
             frags.extend([
                 ("class:status-bar-dim", " \u2502 "),
