@@ -42,7 +42,7 @@ You have 8 plugins with 45 tools available. Use them actively in every task.
 | "Where is Y defined?" | `semble_search(query="...")` |
 | "How does A connect to B?" | `graphify_query(question="...")` or `graphify_path(source="A", target="B")` |
 | "What are the core concepts?" | `graphify_god_nodes(repo=...)` |
-| After writing a file | `lsp_verify(filepath=..., content=..., severity_threshold="warning")` |
+| After writing a file | `lsp_verify(filepath=..., content=..., severity_threshold="warning")` — supports 49 languages (SQL, PL/SQL, LaTeX, Markdown, etc.) |
 | "Fix this error" | `lsp_auto_fix(filepath=...)` then re-verify |
 | Multi-step with error handling | `effect_run(steps=[...])` |
 | Parallel tasks | `effect_scope(action="fork", operations=[...])` |
