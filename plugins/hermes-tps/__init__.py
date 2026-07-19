@@ -193,7 +193,7 @@ def _patch_cli_status_bar() -> None:
             except Exception:
                 width = 80
 
-        if width < 76:
+        if width < 55:
             return _orig_build_text(self, width)
 
         try:
@@ -211,16 +211,18 @@ def _patch_cli_status_bar() -> None:
             if _speed:
                 parts.append(f"{_speed} t/s")
 
-            # Plugin call counts
+            # Plugin call counts — only show toolsets with actual usage
             _usage = snapshot.get("plugin_usage", {})
             if _usage:
                 usage_parts = []
                 for ts in sorted(_TOOLSET_PREFIXES.values()):
                     cnt = _usage.get(ts, 0)
-                    emoji = _TOOLSET_EMOJI.get(ts, "?")
-                    label = _TOOLSET_LABEL.get(ts, ts)
-                    usage_parts.append(f"{emoji}{label}:{cnt}")
-                parts.append(" | ".join(usage_parts))
+                    if cnt > 0:  # Only show active toolsets
+                        emoji = _TOOLSET_EMOJI.get(ts, "?")
+                        label = _TOOLSET_LABEL.get(ts, ts)
+                        usage_parts.append(f"{emoji}{label}:{cnt}")
+                if usage_parts:
+                    parts.append(" | ".join(usage_parts))
 
             parts.append(duration_label)
 
@@ -254,7 +256,7 @@ def _patch_cli_status_bar() -> None:
 
             if width < 52:
                 return _orig_fragments(self)
-            if width < 76:
+            if width < 55:
                 return _orig_fragments(self)
 
             percent = snapshot.get("context_percent")
@@ -292,7 +294,7 @@ def _patch_cli_status_bar() -> None:
                         active.append(("class:status-bar-strong", txt))
                     else:
                         inactive.append(("class:status-bar-dim", txt))
-                if active or inactive:
+                if active:
                     frags.append(("class:status-bar-dim", " \u2502 "))
                     for i, (style, txt) in enumerate(active + inactive):
                         if i > 0:
