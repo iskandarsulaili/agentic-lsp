@@ -114,6 +114,301 @@ def _parse_response(line: str) -> Dict[str, Any]:
 
 # Known language servers and how to launch them
 LANGUAGE_SERVERS: Dict[str, Dict[str, Any]] = {
+    # ── Database / Query Languages ──────────────────────────────────
+    "sql": {
+        "name": "SQL Language Server",
+        "command": ["sql-language-server", "up", "--method", "stdio"],
+        "fallback_commands": [],
+        "install_hint": "npm install -g sql-language-server",
+        "extensions": [".sql"],
+        "root_patterns": [".git"],
+    },
+    "plsql": {
+        "name": "SQL Language Server (PL/SQL)",
+        "command": ["sql-language-server", "up", "--method", "stdio"],
+        "fallback_commands": [],
+        "install_hint": "npm install -g sql-language-server",
+        "extensions": [".plsql", ".pks", ".pkb", ".pck"],
+        "root_patterns": [".git"],
+    },
+    "tsql": {
+        "name": "SQL Language Server (T-SQL)",
+        "command": ["sql-language-server", "up", "--method", "stdio"],
+        "fallback_commands": [],
+        "install_hint": "npm install -g sql-language-server",
+        "extensions": [".tsql"],
+        "root_patterns": [".git"],
+    },
+    "mysql": {
+        "name": "SQL Language Server (MySQL)",
+        "command": ["sql-language-server", "up", "--method", "stdio"],
+        "fallback_commands": [],
+        "install_hint": "npm install -g sql-language-server",
+        "extensions": [".mysql", ".sql"],
+        "root_patterns": [".git"],
+    },
+    "postgresql": {
+        "name": "PostgreSQL Language Server",
+        "command": ["pgls", "--stdio"],
+        "fallback_commands": [["sql-language-server", "up", "--method", "stdio"]],
+        "install_hint": "npm install -g @anthropic/pgls",
+        "extensions": [".pgsql", ".psql", ".sql"],
+        "root_patterns": [".git"],
+    },
+    "sqlite": {
+        "name": "SQL Language Server (SQLite)",
+        "command": ["sql-language-server", "up", "--method", "stdio"],
+        "fallback_commands": [],
+        "install_hint": "npm install -g sql-language-server",
+        "extensions": [".sqlite", ".sqlite3", ".db"],
+        "root_patterns": [".git"],
+    },
+    "graphql": {
+        "name": "GraphQL Language Server",
+        "command": ["graphql-language-service-server", "--stdio"],
+        "fallback_commands": [],
+        "install_hint": "npm install -g graphql-language-service-server",
+        "extensions": [".graphql", ".gql", ".graphqls"],
+        "root_patterns": [".git", ".graphqlrc", "graphql.config.json"],
+    },
+    "prisma": {
+        "name": "Prisma Language Server",
+        "command": ["prisma-language-server", "--stdio"],
+        "fallback_commands": [],
+        "install_hint": "npm install -g @prisma/language-server",
+        "extensions": [".prisma"],
+        "root_patterns": ["prisma/schema.prisma", "schema.prisma", ".git"],
+    },
+    # ── Document / Markup Languages ──────────────────────────────────
+    "markdown": {
+        "name": "Marksman (Markdown)",
+        "command": ["marksman"],
+        "fallback_commands": [["markdown-oxide"], ["markdown-language-server", "--stdio"]],
+        "install_hint": "Install marksman via your package manager",
+        "extensions": [".md", ".markdown", ".mdx"],
+        "root_patterns": [".git", "docs"],
+    },
+    "latex": {
+        "name": "texlab (LaTeX)",
+        "command": ["texlab"],
+        "fallback_commands": [],
+        "install_hint": "Install texlab via your package manager",
+        "extensions": [".tex", ".sty", ".cls", ".bib", ".bbl"],
+        "root_patterns": [".git"],
+    },
+    "xml": {
+        "name": "LemMinX XML Language Server",
+        "command": ["lemminx"],
+        "fallback_commands": [],
+        "install_hint": "Install lemminx via your package manager",
+        "extensions": [".xml", ".xsd", ".xsl", ".xslt", ".svg", ".plist"],
+        "root_patterns": [".git"],
+    },
+    "toml": {
+        "name": "Taplo TOML Language Server",
+        "command": ["taplo"],
+        "fallback_commands": [["taplo-lsp"]],
+        "install_hint": "Install taplo-cli via cargo or package manager",
+        "extensions": [".toml"],
+        "root_patterns": [".git"],
+    },
+    "proto": {
+        "name": "Buf Language Server (Protobuf)",
+        "command": ["bufls", "lsp"],
+        "fallback_commands": [["protols"]],
+        "install_hint": "go install github.com/bufbuild/buf-language-server/cmd/bufls@latest",
+        "extensions": [".proto"],
+        "root_patterns": ["buf.yaml", "buf.gen.yaml", ".git"],
+    },
+    # ── Computational Languages ──────────────────────────────────────
+    "r": {
+        "name": "R Language Server",
+        "command": ["R", "--slave", "-e", "languageserver::run()"],
+        "fallback_commands": [],
+        "install_hint": "install.packages('languageserver') in R",
+        "extensions": [".r", ".R", ".rmd", ".Rmd"],
+        "root_patterns": [".git", "DESCRIPTION"],
+    },
+    "julia": {
+        "name": "Julia Language Server",
+        "command": ["julia", "-e", "using LanguageServer; runserver()"],
+        "fallback_commands": [],
+        "install_hint": "Install LanguageServer.jl in Julia: using Pkg; Pkg.add(\\\"LanguageServer\\\")",
+        "extensions": [".jl"],
+        "root_patterns": [".git", "Project.toml", "Manifest.toml"],
+    },
+    "matlab": {
+        "name": "Matlab Language Server",
+        "command": ["matlab-language-server", "--stdio"],
+        "fallback_commands": [],
+        "install_hint": "npm install -g matlab-language-server",
+        "extensions": [".m"],
+        "root_patterns": [".git"],
+    },
+    # ── Infrastructure / Config Languages ────────────────────────────
+    "terraform": {
+        "name": "Terraform Language Server",
+        "command": ["terraform-ls", "serve"],
+        "fallback_commands": [],
+        "install_hint": "Install terraform-ls via tfswitch or package manager",
+        "extensions": [".tf", ".tfvars", ".hcl"],
+        "root_patterns": ["*.tf", ".terraform", ".git"],
+    },
+    "nix": {
+        "name": "nil Nix Language Server",
+        "command": ["nil"],
+        "fallback_commands": [["nixd"]],
+        "install_hint": "Install nil via nix-env or package manager",
+        "extensions": [".nix"],
+        "root_patterns": ["flake.nix", "default.nix", "shell.nix", ".git"],
+    },
+    "cmake": {
+        "name": "CMake Language Server",
+        "command": ["cmake-language-server"],
+        "fallback_commands": [],
+        "install_hint": "pip install cmake-language-server",
+        "extensions": ["CMakeLists.txt", ".cmake"],
+        "root_patterns": ["CMakeLists.txt", ".git"],
+    },
+    "makefile": {
+        "name": "Makefile Language Server",
+        "command": ["makefile-language-server", "--stdio"],
+        "fallback_commands": [],
+        "install_hint": "npm install -g makefile-language-server",
+        "extensions": ["Makefile", "makefile", "GNUmakefile", ".mk"],
+        "root_patterns": ["Makefile", ".git"],
+    },
+    "powershell": {
+        "name": "PowerShell Language Server",
+        "command": ["powershell-lsp"],
+        "fallback_commands": [],
+        "install_hint": "Install PowerShell Editor Services",
+        "extensions": [".ps1", ".psm1", ".psd1", ".ps1xml"],
+        "root_patterns": [".git"],
+    },
+    # ── General-Purpose Programming Languages ────────────────────────
+    "java": {
+        "name": "Eclipse JDT Language Server",
+        "command": ["jdtls"],
+        "fallback_commands": [],
+        "install_hint": "Install eclipse.jdt.ls via your package manager",
+        "extensions": [".java"],
+        "root_patterns": ["pom.xml", "build.gradle", "settings.gradle", ".git"],
+    },
+    "kotlin": {
+        "name": "Kotlin Language Server",
+        "command": ["kotlin-language-server"],
+        "fallback_commands": [],
+        "install_hint": "Install kotlin-language-server via your package manager",
+        "extensions": [".kt", ".kts", ".ktm"],
+        "root_patterns": ["build.gradle.kts", "pom.xml", "settings.gradle.kts", ".git"],
+    },
+    "scala": {
+        "name": "Metals (Scala)",
+        "command": ["metals"],
+        "fallback_commands": [],
+        "install_hint": "Install Metals via coursier or your package manager",
+        "extensions": [".scala", ".sc"],
+        "root_patterns": ["build.sbt", ".git"],
+    },
+    "csharp": {
+        "name": "Roslyn Language Server (C#)",
+        "command": ["roslyn-lsp"],
+        "fallback_commands": [["omnisharp"]],
+        "install_hint": "dotnet tool install -g roslyn-lsp",
+        "extensions": [".cs", ".csx"],
+        "root_patterns": [".csproj", "*.sln", ".git"],
+    },
+    "php": {
+        "name": "Intelephense (PHP)",
+        "command": ["intelephense", "--stdio"],
+        "fallback_commands": [["phpactor", "language-server"]],
+        "install_hint": "npm install -g intelephense",
+        "extensions": [".php", ".phtml", ".php3", ".php4", ".php5"],
+        "root_patterns": ["composer.json", ".git"],
+    },
+    "ruby": {
+        "name": "Solargraph (Ruby)",
+        "command": ["solargraph", "stdio"],
+        "fallback_commands": [["rubocop-lsp"]],
+        "install_hint": "gem install solargraph",
+        "extensions": [".rb", ".ruby", ".erb", ".rabl"],
+        "root_patterns": ["Gemfile", ".ruby-version", ".git"],
+    },
+    "perl": {
+        "name": "Perl Navigator",
+        "command": ["perlnavigator", "--stdio"],
+        "fallback_commands": [["perl-lsp"]],
+        "install_hint": "npm install -g perlnavigator",
+        "extensions": [".pl", ".pm", ".t", ".pod"],
+        "root_patterns": ["Makefile.PL", "Build.PL", "cpanfile", ".git"],
+    },
+    "lua": {
+        "name": "Lua Language Server",
+        "command": ["lua-language-server"],
+        "fallback_commands": [],
+        "install_hint": "Install lua-language-server via your package manager",
+        "extensions": [".lua", ".luau"],
+        "root_patterns": [".luarc.json", ".luarc.jsonc", ".git"],
+    },
+    "swift": {
+        "name": "SourceKit-LSP (Swift)",
+        "command": ["sourcekit-lsp"],
+        "fallback_commands": [],
+        "install_hint": "Install Xcode or sourcekit-lsp via Swift toolchain",
+        "extensions": [".swift"],
+        "root_patterns": ["Package.swift", ".git"],
+    },
+    "elixir": {
+        "name": "Elixir LS",
+        "command": ["elixir-ls"],
+        "fallback_commands": [["next-ls"]],
+        "install_hint": "Install elixir-ls via your package manager",
+        "extensions": [".ex", ".exs"],
+        "root_patterns": ["mix.exs", ".git"],
+    },
+    "erlang": {
+        "name": "Erlang Language Platform",
+        "command": ["erlang_ls"],
+        "fallback_commands": [],
+        "install_hint": "Install erlang_ls via your package manager",
+        "extensions": [".erl", ".hrl", ".escript"],
+        "root_patterns": ["rebar.config", "erlang.mk", "Makefile", ".git"],
+    },
+    "haskell": {
+        "name": "Haskell Language Server",
+        "command": ["haskell-language-server-wrapper"],
+        "fallback_commands": [["haskell-language-server"]],
+        "install_hint": "Install haskell-language-server via GHCup or your package manager",
+        "extensions": [".hs", ".lhs", ".hsc"],
+        "root_patterns": ["*.cabal", "stack.yaml", "package.yaml", ".git"],
+    },
+    # ── Web Framework Languages ───────────────────────────────────────
+    "vue": {
+        "name": "Vue Language Server (Volar)",
+        "command": ["vue-language-server", "--stdio"],
+        "fallback_commands": [],
+        "install_hint": "npm install -g @vue/language-server",
+        "extensions": [".vue"],
+        "root_patterns": ["package.json", "vue.config.js", ".git"],
+    },
+    "svelte": {
+        "name": "Svelte Language Server",
+        "command": ["svelte-language-server", "--stdio"],
+        "fallback_commands": [],
+        "install_hint": "npm install -g svelte-language-server",
+        "extensions": [".svelte"],
+        "root_patterns": ["package.json", "svelte.config.js", ".git"],
+    },
+    "astro": {
+        "name": "Astro Language Server",
+        "command": ["astro-ls", "--stdio"],
+        "fallback_commands": [],
+        "install_hint": "npm install -g @astrojs/language-server",
+        "extensions": [".astro"],
+        "root_patterns": ["astro.config.mjs", "astro.config.js", "package.json", ".git"],
+    },
+    # ── Already Defined (carried forward) ─────────────────────────────
     "c": {
         "name": "clangd",
         "command": ["clangd"],
@@ -221,15 +516,8 @@ LANGUAGE_SERVERS: Dict[str, Dict[str, Any]] = {
         "extensions": ["Dockerfile", ".dockerfile"],
         "root_patterns": [".git"],
     },
-    "sql": {
-        "name": "SQL Language Server",
-        "command": ["sql-language-server", "up", "--method", "stdio"],
-        "fallback_commands": [],
-        "install_hint": "npm install -g sql-language-server",
-        "extensions": [".sql"],
-        "root_patterns": [".git"],
-    },
 }
+
 
 
 def _find_language_for_file(filepath: str) -> Optional[str]:
@@ -237,11 +525,11 @@ def _find_language_for_file(filepath: str) -> Optional[str]:
     ext = Path(filepath).suffix.lower()
     name = Path(filepath).name
 
-    # Special filenames
+    # Special filenames — match before extension loop
     if name == "Dockerfile" or name.endswith(".dockerfile"):
         return "dockerfile"
-    if name == "Makefile" or name.endswith(".mk"):
-        return None  # No LSP server for Makefiles
+    if name == "CMakeLists.txt" or name == "CMakeLists.txt.in":
+        return "cmake"
 
     for lang, config in LANGUAGE_SERVERS.items():
         if ext in config["extensions"]:
