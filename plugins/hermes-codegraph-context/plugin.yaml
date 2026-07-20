@@ -1,0 +1,5 @@
+name: hermes-codegraph-context
+version: 1.0.0
+description: "Advanced code analysis via CodeGraphContext. Deterministic code relationships, dead code detection, complexity analysis, Spring/Java framework introspection, call chain tracing, and Cypher graph queries. Auto-installs via pip."
+author: Hermes Agent
+license: MIT

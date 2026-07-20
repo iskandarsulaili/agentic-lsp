@@ -1,0 +1,5 @@
+name: hermes-codegraph
+version: 1.0.0
+description: "Code intelligence via CodeGraph (colbymchenry/codegraph). Deterministic AST-based code knowledge graph for Hermes — search symbols, trace callers/callees, analyze impact radius, explore code structure. Auto-installs via npx."
+author: Hermes Agent
+license: MIT

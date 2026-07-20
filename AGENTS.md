@@ -1,7 +1,9 @@
 # Plugin Usage Instructions
 
-You have 8 plugins with 45 tools available. Use them actively in every task.
+You have 10 plugins with 62 tools available. Use them actively in every task.
 - **hermes-tps** (0 tools): TUI status bar showing t/s + plugin call count indicators. Self-contained — survives updates.
+- **hermes-codegraph** (8 tools): Deterministic AST code knowledge graph. Use INSTEAD of grep+Read.
+- **hermes-codegraph-context** (9 tools): Advanced analysis — dead code, complexity, Spring, Cypher.
 
 ## Workflow Priority
 
@@ -13,6 +15,12 @@ You have 8 plugins with 45 tools available. Use them actively in every task.
 6. **LSP** (`lsp_verify`, `lsp_auto_fix`) — verify after every edit
 
 ## Mandatory Rules
+
+- **Code intelligence synergy** (use this order when exploring code):
+  1. `codegraph_explore` — deterministic AST query (callers, callees, impact, source code). Use INSTEAD of grep+Read.
+  2. `codegraph_callers`/`codegraph_callees` — precise caller/callee chains (CodeGraph)
+  3. `cgc_call_chain` / `cgc_dead_code` / `cgc_complexity` — advanced analysis (CodeGraphContext)
+  4. `graphify_query` / `graphify_path` — semantic/LLM exploration for concepts and docs (Graphify)
 
 - **For ALL web queries** → use `searxng_search` over `web_search`. It's faster, broader, and respects privacy. Only fall back to `web_search` if searxng isn't available.
 - **After EVERY edit** → call `lsp_verify(filepath=..., content=...)` — do NOT skip
@@ -86,6 +94,6 @@ If graph.json doesn't exist, the first graphify call auto-builds it. Just call t
 
 ## Troubleshooting
 
-- Plugin toolsets should show: `effect`, `graphify`, `lsp`, `searxng`, `cloakbrowser`, `semble`, `orchestra`
+- Plugin toolsets should show: `codegraph`, `codegraph-context`, `effect`, `graphify`, `lsp`, `searxng`, `cloakbrowser`, `semble`, `orchestra`
 - Enable with: `hermes plugins enable <name>` (NOT `hermes config set`)
 - After enabling, restart Hermes
