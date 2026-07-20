@@ -55,7 +55,7 @@ try:
     def _ensure_searxng_deps() -> str | None:
         """Install SearXNG dependencies. Returns error string or None on success."""
         try:
-            ensure_deps("hermes-searxng", _SEARXNG_DEPS, ask=True)
+            ensure_deps("hermes-searxng", _SEARXNG_DEPS, ask=False)
             return None
         except Exception as e:
             return str(e)
