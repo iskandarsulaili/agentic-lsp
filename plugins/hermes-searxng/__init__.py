@@ -1,24 +1,29 @@
 """
 hermes-searxng — Native metasearch for Hermes via SearXNG.
 
-Queries the already-running SearXNG systemd service (port 8080) via its
-REST API instead of embedding the full SearXNG Python pipeline. This
-avoids blocking on asyncio event loop initialization, engine loading,
-and HTTPX transport pool creation.
+Portable approach that works on any machine:
+1. Check if SearXNG is already running (try REST API on common ports)
+2. If not, start SearXNG as a subprocess (the Flask webapp) and connect via REST API
+3. Cache the subprocess and kill it on plugin shutdown
+
+This avoids embedding SearXNG's asyncio/network pipeline inline (which
+blocks indefinitely) while still working on fresh machines with no
+pre-existing SearXNG service.
 
 ARCHITECTURE:
-  SearXNG runs as a systemd service (searxng.service) on port 8080.
-  This plugin is a thin HTTP client that sends search queries to
-  http://localhost:8080/search and parses the JSON response.
+  SearXNG's search pipeline requires asyncio event loops, HTTPX transport
+  pools, and engine loaders that block when called inline. By running
+  SearXNG as a subprocess (its normal Flask webapp), the plugin avoids
+  these blocking calls while still providing full search functionality.
 
-  No SearXNG Python imports needed — just httpx for HTTP requests.
-
-THREAD SAFETY:
-  httpx.Client is thread-safe. A module-level lock serializes access
-  to the shared client instance.
+  The plugin discovers SearXNG via:
+  1. SEARXNG_BASE_URL env var (explicit config)
+  2. Already-running service on common ports (8080, 8888, 4000)
+  3. Starting it as a subprocess from searxng-src
 
 DEPENDENCIES (JIT installed):
-  httpx — for HTTP requests to the SearXNG service.
+  httpx — for HTTP requests to the SearXNG service
+  SearXNG's own deps (flask, etc.) — only if we need to start it
 """
 
 from __future__ import annotations
@@ -26,7 +31,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
+import sys
 import threading
+import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -35,27 +44,38 @@ logger = logging.getLogger(__name__)
 try:
     from _shared.deps import DepSpec, ensure_deps
 
-    _SEARXNG_DEPS: List[DepSpec] = [
-        DepSpec("httpx", ["python3", "-c", "import httpx"], install=["pip3", "install", "httpx"], purpose="HTTP client for SearXNG REST API"),
+    _HTTPX_DEPS: List[DepSpec] = [
+        DepSpec("httpx", [sys.executable, "-c", "import httpx"], install=[sys.executable, "-m", "pip", "install", "httpx"], purpose="HTTP client for SearXNG REST API"),
     ]
 
-    def _ensure_searxng_deps() -> str | None:
-        """Install SearXNG dependencies. Returns error string or None on success."""
+    def _ensure_httpx() -> str | None:
         try:
-            ensure_deps("hermes-searxng", _SEARXNG_DEPS, ask=False)
+            ensure_deps("hermes-searxng", _HTTPX_DEPS, ask=False)
             return None
         except Exception as e:
             return str(e)
 
 except ImportError:
-    def _ensure_searxng_deps() -> str | None:
+    def _ensure_httpx() -> str | None:
         return "_shared.deps not available — cannot auto-install dependencies"
 
 
-# ── SearXNG REST client ──────────────────────────────────────────────────
-_SEARXNG_BASE_URL = os.environ.get("SEARXNG_BASE_URL", "http://localhost:8080")
+# ── SearXNG discovery ─────────────────────────────────────────────────────
+_SEARXNG_SRC_CANDIDATES = [
+    os.environ.get("HERMES_SEARXNG_SRC", ""),
+    os.path.expanduser("~/.hermes/searxng/searxng-src"),
+    os.path.expanduser("~/searxng/searxng-src"),
+    "/usr/local/share/searxng/searxng-src",
+    str(Path(__file__).resolve().parent.parent.parent / "searxng" / "searxng-src"),
+]
+
+# Common ports where SearXNG might be running
+_SEARXNG_DEFAULT_PORTS = [8080, 8888, 4000]
+
 _SEARXNG_LOCK = threading.Lock()
 _http_client: Optional[Any] = None
+_searxng_process: Optional[subprocess.Popen] = None
+_searxng_url: Optional[str] = None
 
 
 def _get_client() -> Any:
@@ -67,44 +87,143 @@ def _get_client() -> Any:
     return _http_client
 
 
+def _find_searxng_src() -> Optional[str]:
+    """Locate the SearXNG searxng-src directory."""
+    for path in _SEARXNG_SRC_CANDIDATES:
+        if path and (Path(path) / "searx").is_dir():
+            return path
+    return None
+
+
+def _check_port(port: int) -> bool:
+    """Check if SearXNG is responding on a given port."""
+    try:
+        import httpx
+        r = httpx.get(f"http://localhost:{port}/search", params={"q": "ping", "format": "json"}, timeout=5.0)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+def _start_searxng() -> Optional[str]:
+    """Start SearXNG as a subprocess. Returns the base URL or error."""
+    global _searxng_process
+
+    src = _find_searxng_src()
+    if not src:
+        return "Cannot find searxng-src. Set HERMES_SEARXNG_SRC env var or ensure ~/searxng/searxng-src exists."
+
+    # Install SearXNG's own deps
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "flask", "flask_babel", "httpx", "httpx_socks", "msgspec", "PyYAML", "Babel", "Jinja2", "Markdown", "certifi", "idna", "charset-normalizer"],
+            capture_output=True, timeout=120,
+        )
+    except Exception as e:
+        return f"Failed to install SearXNG deps: {e}"
+
+    # Start SearXNG webapp
+    try:
+        env = os.environ.copy()
+        settings_path = str(Path(src) / "searx" / "settings.yml")
+        env["SEARXNG_SETTINGS_PATH"] = settings_path
+        _searxng_process = subprocess.Popen(
+            [sys.executable, "-m", "searx.webapp"],
+            cwd=src,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        # Wait for it to start — try the port from settings.yml (default 8888)
+        import yaml
+        with open(settings_path) as f:
+            settings = yaml.safe_load(f)
+        port = settings.get("server", {}).get("port", 8888)
+        url = f"http://localhost:{port}"
+        for _ in range(30):
+            time.sleep(1)
+            try:
+                import httpx
+                r = httpx.get(f"{url}/search", params={"q": "ping", "format": "json"}, timeout=5.0)
+                if r.status_code == 200:
+                    return url
+            except Exception:
+                continue
+        return f"SearXNG subprocess started but not responding on {url}"
+    except Exception as e:
+        return f"Failed to start SearXNG: {e}"
+
+
+def _discover_searxng() -> Optional[str]:
+    """Discover or start SearXNG. Returns the base URL or None."""
+    global _searxng_url
+
+    # 1. Check env var
+    env_url = os.environ.get("SEARXNG_BASE_URL", "")
+    if env_url:
+        try:
+            import httpx
+            r = httpx.get(f"{env_url}/search", params={"q": "ping", "format": "json"}, timeout=5.0)
+            if r.status_code == 200:
+                _searxng_url = env_url
+                return _searxng_url
+        except Exception:
+            pass
+
+    # 2. Check common ports
+    for port in _SEARXNG_DEFAULT_PORTS:
+        if _check_port(port):
+            _searxng_url = f"http://localhost:{port}"
+            return _searxng_url
+
+    # 3. Try to start it
+    result = _start_searxng()
+    if result and not result.startswith("Cannot") and not result.startswith("Failed"):
+        _searxng_url = result
+        return _searxng_url
+
+    return None
+
+
 class _SearxngEngine:
     """Lazy singleton wrapping SearXNG's REST API.
 
     Thread-safe: all public methods acquire _SEARXNG_LOCK.
+    Portable: works on any machine with or without pre-existing SearXNG.
     """
 
     def __init__(self):
         self._ready = False
         self._error: Optional[str] = None
+        self._base_url: Optional[str] = None
 
     def ensure_ready(self) -> Optional[str]:
-        """Check if SearXNG service is reachable. Returns error or None."""
+        """Discover or start SearXNG. Returns error or None."""
         if self._ready:
             return None
         with _SEARXNG_LOCK:
             if self._ready:
                 return None
 
-            # 1. Install deps
-            deps_err = _ensure_searxng_deps()
+            # 1. Install httpx
+            deps_err = _ensure_httpx()
             if deps_err:
                 self._error = deps_err
                 return deps_err
 
-            # 2. Check if SearXNG is reachable
-            try:
-                client = _get_client()
-                r = client.get(f"{_SEARXNG_BASE_URL}/search", params={"q": "ping", "format": "json"}, timeout=10.0)
-                if r.status_code == 200:
-                    self._ready = True
-                    return None
-                else:
-                    self._error = f"SearXNG returned status {r.status_code}"
-                    return self._error
-            except Exception as e:
-                self._error = f"SearXNG not reachable at {_SEARXNG_BASE_URL}: {e}"
-                logger.error(self._error)
+            # 2. Discover or start SearXNG
+            url = _discover_searxng()
+            if not url:
+                self._error = (
+                    "Cannot find or start SearXNG. "
+                    "Set SEARXNG_BASE_URL env var to an existing SearXNG instance, "
+                    "or ensure ~/searxng/searxng-src exists so the plugin can start it."
+                )
                 return self._error
+
+            self._base_url = url
+            self._ready = True
+            return None
 
     def search(
         self,
@@ -139,11 +258,10 @@ class _SearxngEngine:
                     params["engines"] = ",".join(engines)
 
                 client = _get_client()
-                r = client.get(f"{_SEARXNG_BASE_URL}/search", params=params, timeout=30.0)
+                r = client.get(f"{self._base_url}/search", params=params, timeout=30.0)
                 r.raise_for_status()
                 data = r.json()
 
-                # Extract results
                 results = []
                 for item in data.get("results", []):
                     results.append({
@@ -182,7 +300,7 @@ class _SearxngEngine:
         with _SEARXNG_LOCK:
             try:
                 client = _get_client()
-                r = client.get(f"{_SEARXNG_BASE_URL}/engines", timeout=10.0)
+                r = client.get(f"{self._base_url}/engines", timeout=10.0)
                 r.raise_for_status()
                 data = r.json()
                 engines_list = []
@@ -209,7 +327,7 @@ class _SearxngEngine:
         with _SEARXNG_LOCK:
             try:
                 client = _get_client()
-                r = client.get(f"{_SEARXNG_BASE_URL}/engines", timeout=10.0)
+                r = client.get(f"{self._base_url}/engines", timeout=10.0)
                 r.raise_for_status()
                 data = r.json()
                 cats = {}
@@ -230,7 +348,7 @@ class _SearxngEngine:
         return {
             "ready": self._ready,
             "error": self._error,
-            "searxng_url": _SEARXNG_BASE_URL,
+            "searxng_url": self._base_url,
         }
 
 
