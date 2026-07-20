@@ -59,6 +59,12 @@ _SEMBLE_DEPS = [
         install=[sys.executable, "-m", "pip", "install", "semble"],
         purpose="semantic code search (BM25 + Model2Vec)",
     ),
+    DepSpec(
+        "tree_sitter_language_pack",
+        ["python3", "-c", "from tree_sitter_language_pack import DownloadError"],
+        install=[sys.executable, "-m", "pip", "install", "tree-sitter-language-pack>=1.0,<1.8.0"],
+        purpose="tree-sitter language pack (semble dependency, pinned for DownloadError compat)",
+    ),
 ]
 
 # Install dep BEFORE the module-level import attempt — otherwise the
