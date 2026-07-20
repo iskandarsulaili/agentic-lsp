@@ -1,9 +1,9 @@
 # Plugin Usage Instructions
 
-You have 10 plugins with 62 tools available. Use them actively in every task.
+You have 10 plugins with 61 tools available. Use them actively in every task.
 - **hermes-tps** (0 tools): TUI status bar showing t/s + plugin call count indicators. Self-contained — survives updates.
 - **hermes-codegraph** (8 tools): Deterministic AST code knowledge graph. Use INSTEAD of grep+Read.
-- **hermes-codegraph-context** (9 tools): Advanced analysis — dead code, complexity, Spring, Cypher.
+- **hermes-codegraph-context** (8 tools): Advanced analysis — dead code, complexity, Spring, Cypher.
 
 ## Workflow Priority
 
