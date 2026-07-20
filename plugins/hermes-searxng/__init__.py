@@ -40,16 +40,16 @@ try:
     from _shared.deps import DepSpec, ensure_deps
 
     _SEARXNG_DEPS: List[DepSpec] = [
-        DepSpec("flask", ">=3.0.0"),
-        DepSpec("httpx", ">=0.27.0"),
-        DepSpec("msgspec", ">=0.18.0"),
-        DepSpec("PyYAML", ">=6.0"),
-        DepSpec("Babel", ">=2.14.0"),
-        DepSpec("Jinja2", ">=3.1.0"),
-        DepSpec("Markdown", ">=3.5.0"),
-        DepSpec("certifi", ">=2024.0.0"),
-        DepSpec("idna", ">=3.6"),
-        DepSpec("charset-normalizer", ">=3.3.0"),
+        DepSpec("flask", [sys.executable, "-c", "import flask"], install=[sys.executable, "-m", "pip", "install", "flask"], version=">=3.0.0"),
+        DepSpec("httpx", [sys.executable, "-c", "import httpx"], install=[sys.executable, "-m", "pip", "install", "httpx"], version=">=0.27.0"),
+        DepSpec("msgspec", [sys.executable, "-c", "import msgspec"], install=[sys.executable, "-m", "pip", "install", "msgspec"], version=">=0.18.0"),
+        DepSpec("PyYAML", [sys.executable, "-c", "import yaml"], install=[sys.executable, "-m", "pip", "install", "PyYAML"], version=">=6.0"),
+        DepSpec("Babel", [sys.executable, "-c", "import babel"], install=[sys.executable, "-m", "pip", "install", "Babel"], version=">=2.14.0"),
+        DepSpec("Jinja2", [sys.executable, "-c", "import jinja2"], install=[sys.executable, "-m", "pip", "install", "Jinja2"], version=">=3.1.0"),
+        DepSpec("Markdown", [sys.executable, "-c", "import markdown"], install=[sys.executable, "-m", "pip", "install", "Markdown"], version=">=3.5.0"),
+        DepSpec("certifi", [sys.executable, "-c", "import certifi"], install=[sys.executable, "-m", "pip", "install", "certifi"], version=">=2024.0.0"),
+        DepSpec("idna", [sys.executable, "-c", "import idna"], install=[sys.executable, "-m", "pip", "install", "idna"], version=">=3.6"),
+        DepSpec("charset-normalizer", [sys.executable, "-c", "import charset_normalizer"], install=[sys.executable, "-m", "pip", "install", "charset-normalizer"], version=">=3.3.0"),
     ]
 
     def _ensure_searxng_deps() -> str | None:

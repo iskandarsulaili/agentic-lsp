@@ -137,7 +137,7 @@ def _run_cg(binary: str, args: List[str]) -> Optional[Dict[str, Any]]:
     cmd = [binary] if binary != "npx" else ["npx", "--yes", "@colbymchenry/codegraph"]
 
     # --json flags for machine-readable output
-    if args and args[0] not in ("init", "index", "install", "uninstall"):
+    if args and args[0] not in ("init", "index", "install", "uninstall", "explore"):
         json_args = list(args)
         if "--json" not in json_args:
             json_args.insert(1, "--json")
@@ -240,7 +240,7 @@ def _handle_codegraph_explore(args: dict, **kwargs: Any) -> str:
     project = args.get("project", "")
     if not task:
         return json.dumps({"error": "task description is required"})
-    return _cg_tool_run(["context", task], project)
+    return _cg_tool_run(["explore", task], project)
 
 
 def _handle_codegraph_node(args: dict, **kwargs: Any) -> str:
