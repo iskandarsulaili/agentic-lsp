@@ -42,6 +42,7 @@ try:
     _SEARXNG_DEPS: List[DepSpec] = [
         DepSpec("flask", [sys.executable, "-c", "import flask"], install=[sys.executable, "-m", "pip", "install", "flask"], version=">=3.0.0"),
         DepSpec("httpx", [sys.executable, "-c", "import httpx"], install=[sys.executable, "-m", "pip", "install", "httpx"], version=">=0.27.0"),
+        DepSpec("httpx_socks", [sys.executable, "-c", "import httpx_socks"], install=[sys.executable, "-m", "pip", "install", "httpx_socks"], version=">=0.11.0"),
         DepSpec("msgspec", [sys.executable, "-c", "import msgspec"], install=[sys.executable, "-m", "pip", "install", "msgspec"], version=">=0.18.0"),
         DepSpec("PyYAML", [sys.executable, "-c", "import yaml"], install=[sys.executable, "-m", "pip", "install", "PyYAML"], version=">=6.0"),
         DepSpec("Babel", [sys.executable, "-c", "import babel"], install=[sys.executable, "-m", "pip", "install", "Babel"], version=">=2.14.0"),
