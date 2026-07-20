@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 # ── Toolset → prefix lookup (no Hermes core dependencies) ─────────────
 _TOOLSET_PREFIXES: Dict[str, str] = {
+    "codegraph_": "codegraph",
+    "cgc_": "codegraph-context",
     "effect_": "effect",
     "graphify_": "graphify",
     "lsp_": "lsp",
@@ -32,6 +34,8 @@ _TOOLSET_PREFIXES: Dict[str, str] = {
 }
 
 _TOOLSET_EMOJI: Dict[str, str] = {
+    "codegraph": "\U0001f9ea",        # 🧪
+    "codegraph-context": "\U0001f52c",  # 🔬
     "effect": "\u26a1",         # ⚡
     "graphify": "\U0001f578\ufe0f",  # 🕸️
     "lsp": "\U0001f527",        # 🔧
@@ -42,6 +46,8 @@ _TOOLSET_EMOJI: Dict[str, str] = {
 }
 
 _TOOLSET_LABEL: Dict[str, str] = {
+    "codegraph": "CodeGraph",
+    "codegraph-context": "CGCtx",
     "effect": "Effect",
     "graphify": "Graphify",
     "lsp": "LSP",
