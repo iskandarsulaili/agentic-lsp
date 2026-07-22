@@ -396,10 +396,38 @@ _reindex_debounce_timers: dict[str, threading.Timer] = {}  # repo_root -> Timer
 _reindex_debounce_lock = threading.Lock()
 _REINDEX_DEBOUNCE_S = 10.0  # seconds to wait after last write before reindexing
 _REINDEX_SNIPPET_EXTENSIONS = frozenset({
-    ".py", ".js", ".ts", ".tsx", ".jsx", ".go", ".rs", ".java", ".kt",
-    ".swift", ".c", ".cpp", ".h", ".hpp", ".rb", ".php", ".scala",
-    ".md", ".mdx", ".yaml", ".yml", ".json", ".toml", ".sql",
-    ".css", ".scss", ".html", ".xml",
+    # Programming languages
+    ".py", ".js", ".ts", ".tsx", ".jsx", ".mjs", ".cjs",
+    ".go", ".rs", ".java", ".kt", ".kts", ".ktm", ".scala", ".sc",
+    ".swift", ".c", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".hh", ".hxx",
+    ".rb", ".ruby", ".rabl", ".erb",
+    ".php", ".phtml", ".php3", ".php4", ".php5",
+    ".pl", ".pm", ".t", ".pod",
+    ".lua", ".luau",
+    ".hs", ".lhs", ".hsc",
+    ".erl", ".hrl", ".escript",
+    ".ex", ".exs",
+    ".jl", ".r", ".R", ".rmd", ".Rmd",
+    ".m", ".cs", ".csx",
+    ".vue", ".svelte", ".astro",
+    # Web / Styles
+    ".css", ".scss", ".less", ".html", ".htm", ".xhtml", ".svg",
+    # Data / Config
+    ".json", ".jsonc", ".yaml", ".yml", ".toml", ".xml", ".xsd", ".xsl", ".xslt",
+    ".plist", ".proto", ".prisma", ".graphql", ".gql", ".graphqls",
+    ".sql", ".pgsql", ".psql", ".mysql", ".tsql", ".plsql",
+    ".sqlite", ".sqlite3", ".db",
+    ".hcl", ".tf", ".tfvars", ".nix",
+    # Docs
+    ".md", ".mdx", ".markdown", ".rst", ".tex", ".sty", ".cls", ".bib", ".bbl",
+    # Shell / Scripts
+    ".sh", ".bash", ".zsh",
+    # Makefiles
+    "CMakeLists.txt", ".cmake", "Makefile", "makefile", "GNUmakefile", ".mk",
+    # PowerShell
+    ".ps1", ".psm1", ".psd1", ".ps1xml",
+    # Binary / Other
+    ".wasm", ".dart",
 })
 _REINDEX_SKIP_DIRS = frozenset({
     ".git", "__pycache__", "node_modules", "venv", ".venv",
