@@ -103,6 +103,13 @@ def _ensure_dirs():
         d.mkdir(parents=True, exist_ok=True)
 
 
+def _atomic_write(path: Path, content: str) -> None:
+    """Write content atomically: temp file then rename (prevents corruption on crash)."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(content)
+    tmp.rename(path)
+
+
 def _spec_path(name: str) -> Path:
     return SPECS_DIR / f"{name}.md"
 
@@ -171,7 +178,7 @@ class SpecEngine:
         for sc in scenarios:
             lines.append(f"- {sc}")
         content = "\n".join(lines)
-        path.write_text(content)
+        _atomic_write(path, content)
         return str(path)
 
     @staticmethod
@@ -250,7 +257,7 @@ class SpecEngine:
             "status": "open",
             "deltas": [],
         }
-        (change_dir / "meta.json").write_text(json.dumps(meta, indent=2))
+        _atomic_write((change_dir / "meta.json"), json.dumps(meta, indent=2))
         return str(change_dir)
 
     @staticmethod
@@ -275,7 +282,7 @@ class SpecEngine:
             lines.append(f"- {r}")
 
         delta_path = _change_spec_path(change, spec_name)
-        delta_path.write_text("\n".join(lines))
+        _atomic_write(delta_path, "\n".join(lines))
 
         # Update change metadata
         meta_path = change_dir / "meta.json"
@@ -287,7 +294,7 @@ class SpecEngine:
                 "modified": len(modified or []),
                 "removed": len(removed or []),
             })
-            meta_path.write_text(json.dumps(meta, indent=2))
+            _atomic_write(meta_path, json.dumps(meta, indent=2))
 
         return str(delta_path)
 
@@ -371,7 +378,7 @@ class SpecEngine:
             spec_content = spec_path.read_text()
             for req in added:
                 spec_content += f"\n- {req}"
-            spec_path.write_text(spec_content)
+            _atomic_write(spec_path, spec_content)
             merged.append(spec_name)
 
         return {
@@ -490,7 +497,7 @@ class IssueTracker:
             "lease_expires_at": None,
         }
 
-        _issue_path(issue_id).write_text(json.dumps(issue, indent=2))
+        _atomic_write(_issue_path(issue_id), json.dumps(issue, indent=2))
         return issue
 
     @staticmethod
@@ -526,7 +533,7 @@ class IssueTracker:
         if kwargs.get("status") == "closed":
             issue["closed_at"] = time.time()
 
-        _issue_path(issue_id).write_text(json.dumps(issue, indent=2))
+        _atomic_write(_issue_path(issue_id), json.dumps(issue, indent=2))
         return issue
 
     @staticmethod
@@ -552,7 +559,7 @@ class IssueTracker:
             "timestamp": time.time(),
         })
 
-        _issue_path(issue_id).write_text(json.dumps(issue, indent=2))
+        _atomic_write(_issue_path(issue_id), json.dumps(issue, indent=2))
 
         # Create session
         session = {
@@ -562,7 +569,7 @@ class IssueTracker:
             "expires_at": lease_expiry,
             "heartbeat_at": time.time(),
         }
-        _session_path(agent_id).write_text(json.dumps(session, indent=2))
+        _atomic_write(_session_path(agent_id), json.dumps(session, indent=2))
 
         return {
             "issue_id": issue_id,
@@ -587,9 +594,9 @@ class IssueTracker:
         issue = IssueTracker.get_issue(session["issue_id"])
         if issue:
             issue["lease_expires_at"] = session["expires_at"]
-            _issue_path(session["issue_id"]).write_text(json.dumps(issue, indent=2))
+            _atomic_write(_issue_path(session["issue_id"]), json.dumps(issue, indent=2))
 
-        session_path.write_text(json.dumps(session, indent=2))
+        _atomic_write(session_path, json.dumps(session, indent=2))
         return {
             "agent_id": agent_id,
             "issue_id": session["issue_id"],
@@ -658,7 +665,7 @@ class IssueTracker:
         if depends_on not in deps:
             deps.append(depends_on)
             issue["dependencies"] = deps
-            _issue_path(issue_id).write_text(json.dumps(issue, indent=2))
+            _atomic_write(_issue_path(issue_id), json.dumps(issue, indent=2))
 
         return {"issue_id": issue_id, "depends_on": depends_on, "type": dep_type}
 

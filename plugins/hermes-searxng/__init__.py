@@ -28,6 +28,7 @@ DEPENDENCIES (JIT installed):
 
 from __future__ import annotations
 
+import atexit
 import json
 import logging
 import os
@@ -549,3 +550,18 @@ def register(ctx: Any) -> Dict[str, Any]:
 
     logger.info("hermes-searxng: registered 4 tools + 1 command")
     return {"name": "hermes-searxng", "version": "1.0.0"}
+
+
+def _cleanup() -> None:
+    """Kill the SearXNG subprocess on plugin unload / process exit."""
+    global _searxng_process
+    if _searxng_process and _searxng_process.poll() is None:
+        _searxng_process.terminate()
+        try:
+            _searxng_process.wait(timeout=5)
+        except Exception:
+            _searxng_process.kill()
+        _searxng_process = None
+
+
+atexit.register(_cleanup)
