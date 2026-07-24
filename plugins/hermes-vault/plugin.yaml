@@ -1,0 +1,7 @@
+name: hermes-vault
+version: "1.0.0"
+description: "Persistent memory vault for Hermes — semantic search, structured notes, session lifecycle. Wraps QMD for Obsidian vault search."
+author: "Nous Research"
+license: "MIT"
+type: "plugin"
+entry: "__init__.py"

@@ -31,6 +31,7 @@ _TOOLSET_PREFIXES: Dict[str, str] = {
     "searxng_": "searxng",
     "cloakbrowser_": "cloakbrowser",
     "orchestra_": "orchestra",
+    "vault_": "vault",
 }
 
 _TOOLSET_EMOJI: Dict[str, str] = {
@@ -43,6 +44,7 @@ _TOOLSET_EMOJI: Dict[str, str] = {
     "searxng": "\U0001f310",    # 🌐
     "cloakbrowser": "\U0001f4f1",  # 📱
     "orchestra": "\U0001f3b5",    # 🎵
+    "vault": "\U0001f4e6",      # 📦
 }
 
 _TOOLSET_LABEL: Dict[str, str] = {
@@ -55,6 +57,7 @@ _TOOLSET_LABEL: Dict[str, str] = {
     "searxng": "SearXNG",
     "cloakbrowser": "Cloak",
     "orchestra": "Orch",
+    "vault": "Vault",
 }
 
 
